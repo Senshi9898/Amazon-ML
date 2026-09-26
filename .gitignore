@@ -1,0 +1,9 @@
+.venv/
+.venv-docs/
+cache/
+__pycache__/
+ref/
+submission/output/
+submission/pkg/
+*.zip
+Vigil-Whitepaper.pdf
