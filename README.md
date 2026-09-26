@@ -18,6 +18,7 @@ Machine used: 12 CPU cores, 16 GB RAM. No GPU and no external data or services.
 .venv/bin/python -m er.pipeline run test    # scores the test set in state blocks
 .venv/bin/python -m er.pipeline finish test # writes submission/output/*.tsv
 ```
+Forensics: `.venv/bin/python -m er.forensics` reproduces the data facts.
 Validate: `python3 utils/validate_submission.py -m submission/output/matching_results.tsv -c submission/output/candidate_pairs.tsv -t <dataset>/test`
 
 ## Layout
