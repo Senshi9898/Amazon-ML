@@ -7,7 +7,7 @@
 ---
 
 ## 1. Executive Summary
-We reverse-engineered the data-generating process from the training labels before modelling. Candidate generation retrieves S1 entities for each S2/S3 record with typed-token TF-IDF plus exact structured keys, inside state-sized blocks. A two-stage LightGBM matcher scores each pair: stage 1 compares names, addresses and house numbers; stage 2 adds entity-level evidence (competing S1s, sibling records, the other source). Every record is assigned to at most one S1. Every component was kept or dropped by a pre-registered ablation on held-out states. Full-scale macro F0.5 on 1.94M unseen training entities: **0.961**.
+We reverse-engineered the data-generating process from the training labels before modelling. Candidate generation retrieves S1 entities for each S2/S3 record with typed-token TF-IDF plus exact structured keys, inside state-sized blocks. A two-stage LightGBM matcher scores each pair: stage 1 compares names, addresses and house numbers; stage 2 adds entity-level evidence (competing S1s, sibling records, the other source). Every record is assigned to at most one S1. Every component was kept or dropped by a pre-registered ablation on held-out states. Held-out macro F0.5 **0.971** with **22 candidates per S1** on the test set (3× fewer than without pruning).
 
 ---
 
@@ -30,8 +30,9 @@ Measured on the full training labels (`src/er/forensics.py` reproduces every num
 ## 3. Candidate Generation (Blocking)
 - **Normalisation:** unaccent, lower-case; unwrap DBA/formerly; strip ID tags; segment domain forms with the S1 vocabulary; Indic→Latin dictionary learned from aligned training pairs (1,498 tokens, 96.4% test coverage); set of all address numbers.
 - **Blocking keys used:** typed-token TF-IDF over name tokens, address tokens, numbers, number+street and number+name (df ≤ 100, top-8 S1 per record) ∪ exact keys (sorted name key, number+street, number+name; ≤50 S1 per key, top-8). Runs per country in blocks of ≈150k S1 so IDF and caps match the training scale; records without a parsable state are scored in every block of their country.
-- **Candidate pairs generated:** 116M on the test set (57 per S1; 304 of 1.73M S1 have none).
-- **How true matches were not lost:** measured on held-out states — 97.1% of true pairs retrieved; a perfect scorer on this set would reach macro F0.5 = 0.990. Character 5-gram retrieval was tested and rejected (+0.0008).
+- **Rule-based pruning (no model):** a candidate is kept only if its TF-IDF score is ≥ 0.5 × the record's best score, or it has the record's most shared exact keys; then each S1 keeps its 50 best candidates, which removes generic-name "hub" S1s that attract thousands of unrelated records.
+- **Candidate pairs generated:** 38.5M on the test set — **22.2 per S1** (median 19, 99th percentile 50); reduction ratio 0.999994 against all same-country pairs. 457 of 1.73M S1 have none.
+- **How true matches were not lost:** measured on held-out states — pruning + cap cut candidates 3.4× (46.3 → 13.6 per S1) while candidate recall moved 0.971 → 0.967 and the perfect-scorer ceiling 0.990 → 0.988; end-to-end macro F0.5 0.9727 → 0.9710. Top-k cuts were worse at every budget (top-2: 12 per S1 but ceiling 0.980). Character 5-gram retrieval was tested and rejected (+0.0008).
 
 ---
 
@@ -47,7 +48,7 @@ Measured on the full training labels (`src/er/forensics.py` reproduces every num
 ---
 
 ## 5. Results & Error Analysis
-- **F0.5 Score (macro):** 0.973 on held-out states (256k S1, CI 0.972–0.973); **0.961 on 1.94M S1 at full scale** (US 0.971, India 0.947). Rules baseline 0.640; ablation gains: all-number address set +0.197, learned scorer +0.106, legal/OOV features +0.009, stage 2 +0.003. Rejected (<+0.002): margins, per-S1 expected-F0.5 rule, calibration, char n-grams, hard-negative weighting.
+- **F0.5 Score (macro):** final pruned configuration **0.971** on held-out states (256k S1, CI 0.971–0.972; unpruned 0.973); unpruned pipeline at full scale 0.961 on 1.94M unseen S1 (US 0.971, India 0.947). Rules baseline 0.640; ablation gains: all-number address set +0.197, learned scorer +0.106, legal/OOV features +0.009, stage 2 +0.003. Rejected (<+0.002): margins, per-S1 expected-F0.5 rule, calibration, char n-grams, hard-negative weighting.
 - **Common false positives:** near-miss decoys with a small house-number shift; address-matching records with dissimilar names.
 - **Common false negatives:** empty-address records whose name fits several S1s; records never retrieved (44% of misses); true matches with a genuine house-number typo (indistinguishable from decoys).
 - **France:** train-on-US→test-on-India scores 0.912 vs 0.965, so an unseen country is expected to score below US/India; predicted France structure (5.4% singletons, 3.45 matches per S1) matches the training labels.

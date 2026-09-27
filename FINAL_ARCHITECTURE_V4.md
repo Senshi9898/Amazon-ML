@@ -8,6 +8,8 @@ V4 supersedes V2 (a research plan for a codebase that no longer exists in this r
 
 ## 1. Result
 
+**Final submitted configuration (E-11q, after the organisers' update that smaller candidate sets rank higher):** held-out macro F0.5 **0.9710** (CI 0.9706–0.9715), candidate set on test **38.5M pairs = 22.2 per S1** (median 19, p99 50; was 116M = 57 per S1). The table below is the unpruned configuration it was derived from.
+
 | Measure | Held-out states (DEV-VAL, 256k S1) | Full scale (1.94M S1 never trained on, test-identical pipeline) |
 |---|---|---|
 | **Macro F0.5** | **0.9727** (95% CI 0.9723–0.9731) | **0.9612** (95% CI 0.9610–0.9614) |
@@ -51,7 +53,9 @@ Retrieval, record → S1, top-8 each:
    R-sparse  typed-token TF-IDF (name, address, number, number+street,
              number+name tokens; df ≤ 100)      er/retrieve.py
    R-exact   sorted name key, number+street, number+name (≤ 50 S1/key)  er/rules.py
-   ↓ union = candidate_pairs.tsv                er/features.candidates
+   ↓ union → prune: keep TF-IDF score ≥ 0.5 × record best, or record's most shared exact keys
+   ↓ cap: each S1 keeps its 50 best candidates (removes generic-name hubs)
+   = candidate_pairs.tsv (22.2 per S1 on test)   er/features.candidates
 Stage 1: 35 pair features → LightGBM            er/features.py, er/learn.py
    name · address · house-number relation · legal form · OOV share · retrieval · context
    ↓ keep p1 ≥ 0.01 (8% of pairs, 99.94% of retrieved positives)
@@ -64,7 +68,7 @@ Assignment: record → argmax S1 if p2 ≥ τ* = 0.65 (τ chosen on OOF macro F0
 matching_results.tsv, candidate_pairs.tsv → official validator
 ```
 
-Full test inference: 13 state blocks, 116M candidate pairs, ≈25 min, ≤ 7 GB RAM, 12-core laptop, no GPU, no pretrained model, no external data.
+Full test inference: 13 state blocks, 38.5M candidate pairs after pruning (116M before), ≈20 min, ≤ 7 GB RAM, 12-core laptop, no GPU, no pretrained model, no external data.
 
 ---
 
@@ -82,6 +86,8 @@ Full test inference: 13 state blocks, 116M candidate pairs, ≈25 min, ≤ 7 GB 
 | E-07b | legal-form relation + OOV share | 0.9699 | +0.0094 | keep |
 | E-10a/E-10/E-11 | stage 2: competition, siblings, cross-source | **0.9727** | +0.0027 (CIs disjoint) | keep (as one component) |
 | G3-full | frozen config at full scale, state blocks + cross-block margin | 0.9612 | | confirmation |
+| E-11p | rule-based pruning (0.5 × record best or best exact) | 0.9712 | −0.0015, 46.3 → 14.0 cands/S1 | keep (organisers' update) |
+| **E-11q** | **+ cap 50 candidates per S1** | **0.9710** | −0.0001, 13.6 cands/S1, max 50 | **final** |
 | E-09 | top-1 − top-2 margin | 0.9604 | −0.0001 | reject |
 | E-12 | per-S1 expected-F0.5 decision rule | 0.9609 | +0.0004 | reject |
 | E-13 | isotonic calibration | 0.9607 | +0.0001 | reject |
