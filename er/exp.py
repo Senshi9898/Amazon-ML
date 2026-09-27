@@ -30,6 +30,11 @@ EXPS = {  # id: (parent, hypothesis, change dict)
     "E-05": ("E-04", "union with R-exact (C6) adds >=0.3pt recall (name-only records)", {"ret": "sparse+exact"}),
     "E-07": ("E-05", "a learned pair scorer (LightGBM, C7 features) beats rules", {"scorer": "gbdt"}),
     "E-07b": ("E-07", "legal-form relation + name OOV share separate decoys from positives", {"fv": 2}),
+    "E-07p": ("E-07b", "relative-score candidate pruning (0.5 of record best | best exact) keeps F0.5 at 3.3x fewer candidates",
+              {"prune": 0.5}),
+    "E-11p": ("E-07p", "stage 2 on pruned candidates", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07p"}),
+    "E-07q": ("E-07p", "cap each S1 at its 50 best candidates (removes generic-name hubs)", {"s1cap": 50}),
+    "E-11q": ("E-07q", "stage 2 on pruned + capped candidates", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07q"}),
     "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
              {"hardneg": 5.0}),
     "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
@@ -73,6 +78,10 @@ def _views(cfg, subset):
 
 def _pairs_path(cfg, subset):
     key = {k: cfg[k] for k in ("name", "addr", "topk", "ret", "cap")}
+    if cfg.get("prune"):
+        key["prune"] = cfg["prune"]
+    if cfg.get("s1cap"):
+        key["s1cap"] = cfg["s1cap"]
     if cfg["fv"] > 1:
         key["fv"] = cfg["fv"]
     return CACHE / "pairs" / f"{subset}_{hashlib.md5(str(sorted(key.items())).encode()).hexdigest()[:8]}.parquet"

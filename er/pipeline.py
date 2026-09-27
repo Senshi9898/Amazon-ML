@@ -23,7 +23,7 @@ from .data import CACHE, ROOT, load, load_gt, load_recs, write_id_lists
 from .split import STATES, _components, _last_match, learn_comp_map, load_subset, s1_states
 from .views import addr_view, indic_dict, name_view, s1_vocab
 
-CFG = exp.config("E-11")
+CFG = exp.config("E-11q")  # pruned candidates (organisers' update: smaller candidate sets rank higher)
 F1 = exp._feats(CFG)
 F2 = F1 + stage2.CTX2 + stage2.SIB + stage2.XSRC
 MODELS = CACHE / "models"
@@ -43,7 +43,7 @@ def train():
     m1 = learn.fit(tr, F1)
     m1.save_model(MODELS / "stage1.txt")
     del tr
-    oof1 = pl.read_parquet(CACHE / "preds" / "E-07b_oof_devtrain.parquet")  # same config, saved by E-07b
+    oof1 = pl.read_parquet(CACHE / "preds" / f"{CFG['preds']}_oof_devtrain.parquet")  # same config, saved by the parent run
     t2 = exp._stage2_table(CFG, "devtrain", oof1)
     tau, curve = learn.choose_tau(learn.oof(t2, F2), s1te, trutht)
     learn.fit(t2, F2).save_model(MODELS / "stage2.txt")

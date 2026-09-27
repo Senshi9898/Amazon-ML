@@ -30,7 +30,7 @@ def candidates(cfg, s1v, rv):
     if "sparse" in cfg["ret"]:
         c = retrieve.sparse(s1v, rv, cfg["topk"], cfg["cap"]).rename({"score": "sp_score", "rank": "sp_rank"})
     if "exact" in cfg["ret"]:
-        e = rules.block(s1v, rv, cfg["addr"], cfg["topk"]).rename({"hits": "ex_hits"})
+        e = rules.block(s1v, rv, cfg["addr"], cfg.get("ex_topk", cfg["topk"])).rename({"hits": "ex_hits"})
         c = e if c is None else c.join(e, on=["rec_id", "s1_id"], how="full", coalesce=True)
     if "char" in cfg["ret"]:
         # R-char only for the weak stratum: records with an empty address or no candidate so far
@@ -44,6 +44,17 @@ def candidates(cfg, s1v, rv):
                     ("ch_score", pl.Float32), ("ch_rank", pl.Int16)):
         if col not in c.columns:
             c = c.with_columns(pl.lit(None, dt).alias(col))
+    if cfg.get("prune"):
+        # rule-based pruning (no model): keep a candidate only if its TF-IDF score is within `prune` of the
+        # record's best, or it has the record's most shared exact keys. 3.3x fewer candidates per S1.
+        c = c.filter((pl.col("sp_score") >= cfg["prune"] * pl.col("sp_score").max().over("rec_id"))
+                     | (pl.col("ex_hits") == pl.col("ex_hits").max().over("rec_id")))
+    if cfg.get("s1cap"):
+        # generic-name S1s ("hubs") attract thousands of records; a true S1 has at most 11 matches.
+        # Keep each S1's `s1cap` best candidates by (relative TF-IDF score, shared exact keys).
+        rel = (pl.col("sp_score") / pl.col("sp_score").max().over("rec_id")).fill_null(0)
+        c = c.with_columns(_r=pl.struct(rel, pl.col("ex_hits").fill_null(0)).rank("ordinal", descending=True)
+                              .over("s1_id")).filter(pl.col("_r") <= cfg["s1cap"]).drop("_r")
     return c
 
 
