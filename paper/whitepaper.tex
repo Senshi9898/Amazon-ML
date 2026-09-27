@@ -206,7 +206,8 @@ score $\ge 0.5\times$ best, or best exact & 14.0 & 0.968 & 0.989 & 0.9712 \\
 \quad $+$ cap 50 per S1 (E-11q, submitted 0.951) & 13.6 & 0.966 & 0.988 & 0.9710 \\
 \quad $+$ rarest-6 query tokens at cap 3000, expansions (E-11r, 0.955) & 13.8 & 0.981 & 0.993 & 0.9763 \\
 \quad $+$ 3 rarest name tokens always queried (E-11s) & 13.7 & 0.983 & 0.994 & 0.9769 \\
-\quad $+$ token positive-rate features in stage 2 (E-11t, \textbf{final}) & \textbf{13.7} & \textbf{0.983} & \textbf{0.994} & \textbf{0.9824} \\
+\quad $+$ token positive-rate features in stage 2 (E-11t) & 13.7 & 0.983 & 0.994 & 0.9824 \\
+\quad $+$ rate table from the full training set (E-11v, \textbf{final}) & \textbf{13.7} & \textbf{0.983} & \textbf{0.994} & \textbf{0.9830} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -354,7 +355,8 @@ E-11p & rule-based candidate pruning & 0.9712 & $-0.0015$, $3.3\times$ fewer & k
 E-11q & $+$ cap 50 candidates per S1 & 0.9710 & $-0.0001$ & submitted (0.951) \\
 E-11r & rarest-6 query tokens at cap 3000, abbreviation/state/ordinal expansion, all-pairs number relations & 0.9763 & $+0.0053$ & submitted (0.955) \\
 E-11s & $+$ guaranteed quota of 3 rarest name tokens per query & 0.9769 & $+0.0006$, recall $0.981 \to 0.983$ & keep \\
-E-11t & $+$ TOKR: out-of-fold positive rate of the name tokens the record adds / drops (decoy vocabulary ``holdings'', ``industries'', ``ventures'': 0\%; corruption vocabulary ``center'', ``services'': 35--45\%) & \textbf{0.9824} & $+0.0055$, precision $0.990 \to 0.995$ & \textbf{final} \\
+E-11t & $+$ TOKR: out-of-fold positive rate of the name tokens the record adds / drops (decoy vocabulary ``holdings'', ``industries'', ``ventures'': 0\%; corruption vocabulary ``center'', ``services'': 35--45\%) & 0.9824 & $+0.0055$, precision $0.990 \to 0.995$ & keep \\
+E-11v & TOKR table from the full training set (1.94M S1 outside DEV-VAL, 10.5M labelled pairs) & \textbf{0.9830} & $+0.0006$, precision $0.9951 \to 0.9955$ & \textbf{final} \\
 E-08 & hard-negative weighting ($\times5$, OOF $p\ge0.1$) & 0.9699 & $+0.0000$ & reject \\
 E-11h & stage 2 on E-08 & 0.9727 & $+0.0000$ & reject \\
 E-04b & posting cap 300 & & $3\times$ join volume & reject (memory) \\
@@ -517,6 +519,8 @@ E-11r & devval & 0.9763 & 0.980 & 0.993 & 3.9 & 2.7 & KEEP \\
 E-07s & devval & 0.9745 & 0.983 & 0.994 & 13.7 & 3.2 & KEEP \\
 E-11s & devval & 0.9769 & 0.982 & 0.994 & 3.9 & 2.7 & KEEP \\
 E-11t & devval & 0.9824 & 0.982 & 0.994 & 3.9 & 3.0 & KEEP \\
+E-11u & devval & 0.9827 & 0.982 & 0.994 & 3.9 & 3.2 & KILL \\
+E-11v & devval & 0.9830 & 0.982 & 0.994 & 3.9 & 3.2 & KEEP \\
 \bottomrule
 \end{tabular}
 \end{center}

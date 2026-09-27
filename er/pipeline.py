@@ -23,7 +23,7 @@ from .data import CACHE, ROOT, load, load_gt, load_recs, write_id_lists
 from .split import STATES, _components, _last_match, learn_comp_map, load_subset, s1_states
 from .views import addr_view, indic_dict, name_view, s1_vocab
 
-CFG = exp.config("E-11t")  # + token-rate stage-2 features; pruned candidates (organisers: smaller candidate sets rank higher)
+CFG = exp.config("E-11v")  # token-rate stage-2 features from the full training set; pruned candidates
 F1 = exp._feats(CFG)
 F2 = F1 + [f for g in CFG["stage2"] for f in getattr(stage2, g)]
 TOKR = "TOKR" in CFG["stage2"]

@@ -8,7 +8,7 @@ V4 supersedes V2 (a research plan for a codebase that no longer exists in this r
 
 ## 1. Result
 
-**Final submitted configuration (E-11t):** held-out macro F0.5 **0.9824** (CI 0.9821–0.9827; pair precision 0.995, recall 0.964, singletons 0.983), candidate recall 0.983 at 13.7 candidates per S1 (oracle F0.5 0.994). E-11t = E-11s + TOKR: the training-label positive rate of the name tokens a record adds or drops relative to S1 (+0.0055, decoy false positives 7,715 → 3,575). Earlier uploads: E-11q 0.9710 held-out / 0.951 public leaderboard; E-11r 0.9763 / 0.955. E-11s adds the name-token query quota (E-07s), the French department→region map, a +0.10 test threshold for the test set's 1.9× decoy density, and cross-block pair de-duplication (+0.0009 at full scale). The table below is the unpruned E-11 configuration the line was derived from.
+**Final submitted configuration (E-11v):** held-out macro F0.5 **0.9830** (CI 0.9827–0.9833; pair precision 0.9955, recall 0.965, singletons 0.984), candidate recall 0.983 at 13.7 candidates per S1 (oracle F0.5 0.994). E-11t = E-11s + TOKR: the training-label positive rate of the name tokens a record adds or drops relative to S1 (+0.0055, decoy false positives 7,715 → 3,575). E-11v = E-11t with the rate table built from every stage-2 candidate pair of the full-scale training run outside the DEV-VAL states (10.5M labelled pairs, 2.8M tokens instead of 41k): +0.0006, adopted as a monotone data-mass increase of the same feature (below the +0.002 rule, stated as an exception). Earlier uploads: E-11q 0.9710 held-out / 0.951 public leaderboard; E-11r 0.9763 / 0.955. E-11s adds the name-token query quota (E-07s), the French department→region map, a +0.10 test threshold for the test set's 1.9× decoy density, and cross-block pair de-duplication (+0.0009 at full scale). The table below is the unpruned E-11 configuration the line was derived from.
 
 | Measure | Held-out states (DEV-VAL, 256k S1) | Full scale (1.94M S1 never trained on, test-identical pipeline) |
 |---|---|---|
@@ -90,7 +90,9 @@ Full test inference: 13 state blocks, 38.5M candidate pairs after pruning (116M 
 | E-11q | + cap 50 candidates per S1 | 0.9710 | −0.0001, 13.6 cands/S1, max 50 | submitted (0.951 public) |
 | E-07r / E-11r | rarest-6 query tokens at cap 3000, abbreviation/state/ordinal expansion, dotted legal forms, all-pairs number relations, alignment features | 0.9763 | +0.0053, recall 0.967 → 0.981 at 13.8 cands/S1 | keep; submitted (0.955 public) |
 | E-07s / E-11s | + guaranteed quota of 3 rarest name tokens per query (a corrupted house number no longer empties the query: 6.7k exact-name positives were never retrieved) | 0.9769 | +0.0006, recall 0.981 → 0.983 at 13.7 cands/S1 | keep |
-| **E-11t** | **+ TOKR: positive rate (train labels, out of fold) of the name tokens the record adds / drops** — decoy vocabulary ("holdings", "industries", "ventures": 0%) vs corruption vocabulary ("center", "services": 35–45%) | **0.9824** | +0.0055 (CIs disjoint), precision 0.990 → 0.995 | **final** |
+| E-11t | + TOKR: positive rate (train labels, out of fold) of the name tokens the record adds / drops — decoy vocabulary ("holdings", "industries", "ventures": 0%) vs corruption vocabulary ("center", "services": 35–45%) | 0.9824 | +0.0055 (CIs disjoint), precision 0.990 → 0.995 | keep |
+| E-11u | + the same on street tokens and on the exact substitution pair | 0.9827 | +0.0003 | reject |
+| **E-11v** | **TOKR table from the full training set** (1.94M S1 outside DEV-VAL, 10.5M pairs) | **0.9830** | +0.0006, precision 0.9951 → 0.9955, singletons up | **final** (rule exception: same feature, more labels) |
 | E-09 | top-1 − top-2 margin | 0.9604 | −0.0001 | reject |
 | E-12 | per-S1 expected-F0.5 decision rule | 0.9609 | +0.0004 | reject |
 | E-13 | isotonic calibration | 0.9607 | +0.0001 | reject |

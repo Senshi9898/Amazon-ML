@@ -46,6 +46,8 @@ EXPS = {  # id: (parent, hypothesis, change dict)
                        "vocabulary from corruption vocabulary", {"stage2": ["CTX2", "SIB", "XSRC", "TOKR"]}),
     "E-11u": ("E-11t", "the same statistic on street tokens and on the exact substitution pair adds precision",
               {"stage2": ["CTX2", "SIB", "XSRC", "TOKR", "TOKA", "TOKP"]}),
+    "E-11v": ("E-11t", "token rates from all 1.94M non-DEV-VAL training S1s (9x the label mass) cover the rare tokens",
+              {"stage2": ["CTX2", "SIB", "XSRC", "TOKR"], "tokfile": "token_rates_full.parquet"}),
     "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
              {"hardneg": 5.0}),
     "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
@@ -196,7 +198,9 @@ def _stage2_table(cfg, subset, p, table=None):
             nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
         del s1v, rv
         oof = table is None
-        if oof:
+        if oof and cfg.get("tokfile"):  # rates built from the full training set by er.tokrates (DEV-VAL excluded)
+            table = pl.read_parquet(CACHE / cfg["tokfile"])
+        elif oof:
             table = stage2.token_table(t.select("rec_id", "s1_id", "y"), nts, ntr)
         t = stage2.token_rates(t, nts, ntr, table, oof=oof)
     return t, table
