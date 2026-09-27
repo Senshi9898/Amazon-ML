@@ -48,6 +48,10 @@ EXPS = {  # id: (parent, hypothesis, change dict)
               {"stage2": ["CTX2", "SIB", "XSRC", "TOKR", "TOKA", "TOKP"]}),
     "E-11v": ("E-11t", "token rates from all 1.94M non-DEV-VAL training S1s (9x the label mass) cover the rare tokens",
               {"stage2": ["CTX2", "SIB", "XSRC", "TOKR"], "tokfile": "token_rates_full.parquet"}),
+    "E-11x": ("E-11v", "a larger stage-2 model (255 leaves, 800 rounds, lr 0.03) fits the rate features better",
+              {"hp": {"num_leaves": 255, "rounds": 800, "learning_rate": 0.03, "min_data_in_leaf": 100}}),
+    "E-11w": ("E-11v", "stacked: full-train rates for street tokens, substitution pairs and token shape (prefix/suffix 4)",
+              {"stage2": ["CTX2", "SIB", "XSRC", "TOKR", "TOKA", "TOKP", "TOKC"], "tokfile": "token_rates_full2.parquet"}),
     "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
              {"hardneg": 5.0}),
     "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
@@ -192,7 +196,7 @@ def _stage2_table(cfg, subset, p, table=None):
     t = stage2.context(pairs, p, stage2.addr_sig(recs))
     if "TOKR" in cfg.get("stage2", []):
         _, _, _, s1v, rv = _views(cfg, subset)
-        if "TOKA" in cfg["stage2"] or "TOKP" in cfg["stage2"]:
+        if any(g in cfg["stage2"] for g in ("TOKA", "TOKP", "TOKC")):
             nts, ntr = s1v.select(s1_id="id", nt1="nt", st1="st"), rv.select(rec_id="id", nt="nt", st="st")
         else:
             nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
@@ -208,6 +212,7 @@ def _stage2_table(cfg, subset, p, table=None):
 
 def run_stage2(exp_id, subset):
     cfg = config(exp_id)
+    learn.HP = cfg.get("hp", {})
     feats = _feats(cfg) + [f for g in cfg["stage2"] for f in getattr(stage2, g)]
     tr, table = _stage2_table(cfg, "devtrain", pl.read_parquet(CACHE / "preds" / f"{cfg['preds']}_oof_devtrain.parquet"))
     s1t, _, trutht = load_subset("devtrain")

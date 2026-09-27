@@ -21,8 +21,10 @@ XSRC = ["s_hi_same", "s_hi_other", "s_max_other", "s_sum_other"]
 TOKR = ["tr_min", "tr_max", "ts_min", "ts_max", "tr_n"]
 TOKA = ["ta_min", "ta_max", "tas_min", "tas_max"]  # same statistic on street tokens the record adds / drops
 TOKP = ["tp_rate", "tp_n"]  # rate of the exact substitution (S1 tokens dropped -> record tokens added)
+TOKC = ["tc1_min", "tc1_max", "tc2_min", "tc2_max"]  # token shape: 4-char prefix / suffix of the added tokens
 TOK_MIN_N = 5
-SIDES = {"r": ("uns_r", "tr"), "s": ("uns_s", "ts"), "ar": ("uns_ar", "ta"), "as": ("uns_as", "tas"), "p": ("pair", "tp")}
+SIDES = {"r": ("uns_r", "tr"), "s": ("uns_s", "ts"), "ar": ("uns_ar", "ta"), "as": ("uns_as", "tas"), "p": ("pair", "tp"),
+         "c1": ("pre4", "tc1"), "c2": ("suf4", "tc2")}
 
 
 def addr_sig(recs):
@@ -69,8 +71,9 @@ def _uns(d, nts, ntr):
         u = u.with_columns(uns_ar=pl.col("st").list.set_difference("st1"), uns_as=pl.col("st1").list.set_difference("st"))
     small = (pl.col("uns_r").list.len() <= 2) & (pl.col("uns_s").list.len() <= 2) & (pl.col("uns_r").list.len() + pl.col("uns_s").list.len() > 0)
     u = u.with_columns(pair=pl.when(small).then(pl.concat_list([pl.concat_str(
-        pl.col("uns_s").list.sort().list.join(" "), pl.lit(">"), pl.col("uns_r").list.sort().list.join(" "))])))
-    return u.select("rec_id", "s1_id", *[c for c in ("uns_r", "uns_s", "uns_ar", "uns_as", "pair") if c in u.columns])
+        pl.col("uns_s").list.sort().list.join(" "), pl.lit(">"), pl.col("uns_r").list.sort().list.join(" "))])),
+        pre4=pl.col("uns_r").list.eval(pl.element().str.slice(0, 4)), suf4=pl.col("uns_r").list.eval(pl.element().str.slice(-4)))
+    return u.select("rec_id", "s1_id", *[c for c in ("uns_r", "uns_s", "uns_ar", "uns_as", "pair", "pre4", "suf4") if c in u.columns])
 
 
 def token_table(d, nts, ntr, k=5):

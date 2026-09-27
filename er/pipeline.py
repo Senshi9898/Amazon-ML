@@ -38,12 +38,15 @@ def _dir(split):
 # ---------------- models ----------------
 def train():
     MODELS.mkdir(parents=True, exist_ok=True)
+    learn.HP = CFG.get("hp", {})  # stage-2 hyper-parameters (stage 1 below is fitted before this matters: reset)
+    hp, learn.HP = learn.HP, {}
     tr = features.read(exp._pairs_path(CFG, "devtrain"))
     s1t, _, trutht = load_subset("devtrain")
     s1te = s1t.select(s1_id="id", country="country")
     m1 = learn.fit(tr, F1)
     m1.save_model(MODELS / "stage1.txt")
     del tr
+    learn.HP = hp
     oof1 = pl.read_parquet(CACHE / "preds" / f"{CFG['preds']}_oof_devtrain.parquet")  # same config, saved by the parent run
     t2, table = exp._stage2_table(CFG, "devtrain", oof1)
     if TOKR:
@@ -126,7 +129,7 @@ def block(split, b):
         c = features.candidates(CFG, s1v, rv)
         features.build(c, s1v, rv, ppath, feats=F1)
         del c
-    if "TOKA" in CFG["stage2"] or "TOKP" in CFG["stage2"]:
+    if any(g in CFG["stage2"] for g in ("TOKA", "TOKP", "TOKC")):
         nts, ntr = s1v.select(s1_id="id", nt1="nt", st1="st"), rv.select(rec_id="id", nt="nt", st="st")
     else:
         nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")

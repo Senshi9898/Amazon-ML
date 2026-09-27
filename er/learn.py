@@ -11,10 +11,14 @@ PARAMS = dict(objective="binary", learning_rate=0.05, num_leaves=127, min_data_i
 ROUNDS = 400
 
 
+HP = {}  # per-experiment overrides: LightGBM params + "rounds" (exp "hp" key)
+
+
 def fit(p, feats, seed=0):
     w = p["w"].to_numpy() if "w" in p.columns else None
     ds = lgb.Dataset(p.select(feats).to_numpy(), label=p["y"].to_numpy(), weight=w, feature_name=feats)
-    return lgb.train({**PARAMS, "seed": seed}, ds, ROUNDS)
+    hp = {k: v for k, v in HP.items() if k != "rounds"}
+    return lgb.train({**PARAMS, **hp, "seed": seed}, ds, HP.get("rounds", ROUNDS))
 
 
 def predict(model, p, feats):

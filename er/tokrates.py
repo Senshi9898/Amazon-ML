@@ -6,7 +6,7 @@ import polars as pl
 from . import stage2
 from .data import CACHE, load, load_gt, load_recs
 from .split import load_subset
-from .views import indic_dict, name_view, s1_vocab
+from .views import addr_view, indic_dict, name_view, s1_vocab
 
 if __name__ == "__main__":
     dv = load_subset("devval")[0].select("id")
@@ -19,9 +19,10 @@ if __name__ == "__main__":
     recs = load_recs("train").join(pairs.select(id="rec_id").unique(), on="id", how="semi")
     vocab = s1_vocab(s1)
     indic = indic_dict(exclude_s1=dv["id"], tag="ex_devval")
-    nts = name_view(s1, "V4", vocab, indic).select(s1_id="id", nt1="nt")
-    ntr = name_view(recs, "V4", vocab, indic).select(rec_id="id", nt="nt")
+    nts = addr_view(name_view(s1, "V4", vocab, indic), "A3").select(s1_id="id", nt1="nt", st1="st")
+    ntr = addr_view(name_view(recs, "V4", vocab, indic), "A3").select(rec_id="id", nt="nt", st="st")
     del s1, recs
     t = stage2.token_table(pairs, nts, ntr)
-    t.write_parquet(CACHE / "token_rates_full.parquet")
+    import sys
+    t.write_parquet(CACHE / (sys.argv[1] if len(sys.argv) > 1 else "token_rates_full.parquet"))
     print("table rows", t.height, "tokens", t["t"].n_unique(), flush=True)
