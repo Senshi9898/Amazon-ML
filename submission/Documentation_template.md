@@ -1,7 +1,7 @@
 # ML Challenge 2026: Business Entity Resolution Solution
 
-**Team Name:** [Your Team Name]
-**Team Members:** [List all team members]
+**Team Name:** Grokking
+**Team Members:** Divyanshu (team leader), Aaditya Rawat, Shristi Chandra
 **Submission Date:** 27 September 2026
 
 ---
