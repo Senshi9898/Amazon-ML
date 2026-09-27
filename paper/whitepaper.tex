@@ -45,6 +45,7 @@ The standard recipe---normalise strings, block on keys, score pairs with fuzzy-m
 \item A retrieval stage combining typed-token TF-IDF with exact structured keys, which retrieves 97.1\% of true pairs at 46 candidates per S1 (Section~\ref{sec:retrieval}).
 \item A two-stage matcher whose second stage uses entity-level evidence: competing S1s, siblings sharing a corrupted address, and support from the other source (Section~\ref{sec:model}).
 \item A scale-consistent inference scheme (state blocks) and a validation design by whole states that keeps decoys in the same split as the entities they imitate (Sections~\ref{sec:arch} and~\ref{sec:method}).
+\item An analytic acceptance condition for macro $\Fh$ (eq.~\ref{eq:marginal}) that explains why a single global threshold is near-optimal, and an error anatomy showing that the remaining loss is retrieval-bound, not scorer-bound (Section~\ref{sec:anatomy}).
 \item A complete, honest ablation record, including the components that were tested and rejected (Appendix~\ref{app:log}).
 \end{itemize}
 
@@ -89,6 +90,37 @@ Leakage & IDs, row and label order: correlation $-0.0004$ & no identifier featur
 \end{table}
 
 \paragraph{Two levels of corruption.} Addresses are corrupted \emph{once per source}: when two records of the same S1 from the same source both disagree with the S1 house number, they agree with each other in 92--98\% of cases, and within-source siblings are more alike (address Jaccard 0.72--0.82) than each is to S1 (0.50--0.81). Names are corrupted \emph{per record}: insertion/deletion typos (25\% of changed tokens), substitutions (15\%), leet digits (7\%), legal-form changes, token reordering, noise prefixes, ID tags, domain forms, \emph{formerly known as}/\emph{DBA} wrappers and full rebrands to random strings (2.7\%).
+
+Table~\ref{tab:ops} gives the measured rate of each operator by source and country on 231k sampled true pairs. The rates differ enough between S2 and S3 that the source label is itself informative, and enough between countries that any fixed normalisation rule must be validated per country.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Corruption-operator rates on true matches (share of pairs; 231,209 sampled pairs). ``---'' = not applicable.}
+\label{tab:ops}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Operator & S2 US & S2 India & S3 US & S3 India \\
+\midrule
+Name tokens identical to S1 & 30.6\% & 17.4\% & 30.3\% & 20.1\% \\
+Name tokens dropped & 17.3\% & 35.5\% & 16.2\% & 26.3\% \\
+Name tokens added & 11.9\% & 6.9\% & 15.2\% & 10.0\% \\
+Name tokens reordered & 6.1\% & 5.1\% & 5.9\% & 5.0\% \\
+No name token shared with S1 & 7.8\% & 5.9\% & 7.8\% & 8.4\% \\
+Name in Indic script & --- & 23.3\% & --- & 13.0\% \\
+Accent injected into Latin name & 7.3\% & 5.1\% & 7.4\% & 6.0\% \\
+Name entirely upper-case & 23.6\% & 16.3\% & 3.3\% & 2.9\% \\
+Domain / handle form & 5.6\% & 4.4\% & 5.4\% & 4.7\% \\
+\emph{formerly} / DBA / t/a wrapper & 0.0\% & 0.0\% & 2.4\% & 1.6\% \\
+Address empty & 4.9\% & 3.9\% & 4.6\% & 4.1\% \\
+Address tokens identical to S1 & 13.3\% & 11.3\% & 4.5\% & 4.3\% \\
+Address components dropped & 13.7\% & 51.3\% & 2.2\% & 35.5\% \\
+Address components reordered & 0.4\% & 4.9\% & 4.6\% & 30.7\% \\
+House number identical & 64.6\% & 60.0\% & 66.2\% & 60.2\% \\
+US state as code / full name & 94.5 / 0.6\% & --- & 6.4 / 89.1\% & --- \\
+India state as 2-letter code / native script & --- & 0.0 / 20.5\% & --- & 55.2 / 18.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \paragraph{The decoy signature.} True matches almost always keep the S1 house number or reformat it; near-miss decoys keep name, city and street but move the number by a small amount (Figure~\ref{fig:house}). In the US, $|\Delta| \le 10$ occurs in 63.7\% of decoys and in 1.4\% of true matches. Source signatures also differ measurably (Table~\ref{tab:sources}), which is why the model receives the source as a feature.
 
@@ -154,6 +186,8 @@ w_t = \Bigl(\log \frac{N_c}{\mathrm{df}_t}\Bigr)^2 \quad (\mathrm{df}_t \le 100)
 \end{equation}
 For $N_c = 150{,}000$, a number+street token shared by 10 entities has $w = (\ln 15{,}000)^2 = 9.616^2 = 92.5$, and a name token with $\mathrm{df} = 100$ has $w = (\ln 1{,}500)^2 = 53.5$. Tokens with $\mathrm{df} > 100$ are dropped: a cap of 300 would triple the join volume (389 versus 131 postings per record) for no measured gain. \textbf{R-exact} adds exact keys (sorted name key, number+street, number+name), drops keys shared by more than 50 S1, and keeps the eight S1 with most shared keys per record.
 
+\paragraph{Cost model.} The join volume of R-sparse for a record $r$ is $\sum_{t\in T(r),\,\mathrm{df}_t\le c}\mathrm{df}_t$: the sum of posting-list lengths of its tokens under the cap $c$. Measured on a 256k-entity partition this is 131 postings per record at $c=100$, 389 at $c=300$ and 1,614 at $c=1{,}000$, so the cap is the single knob that trades recall for memory; at $c=100$ a 1.2M-record partition costs $\approx$157M join rows, processed in 16 record chunks so that no chunk exceeds 5\,GB. R-exact adds a bounded $\le 50$ postings per key. The union is at most $16$ S1 per record before deduplication, and 46 records per S1 on average after it.
+
 The two retrievers fail on different records (Figure~\ref{fig:recall}): TF-IDF recovers address-only positives, exact name keys recover records with an empty address. Their union retrieves 97.1\% of true pairs, and a perfect scorer on this candidate set would reach $\Fh = 0.990$ (Table~\ref{tab:retrieval}).
 
 \begin{figure}[htbp]
@@ -210,7 +244,9 @@ The legal-form and out-of-vocabulary groups came from error analysis of the firs
 p_2(r,e) = g\Bigl(\mathbf{x}(r,e),\; p_1(r,e),\; p_1(r,e) - \max_{e'\ne e} p_1(r,e'),\; \max_{r'\in\operatorname{sib}(r)} p_1(r',e),\; \sum_{r''\in\bar s(r)} p_1(r'',e)\Bigr),
 \label{eq:stage2}
 \end{equation}
-where $\operatorname{sib}(r)$ are records of the same source with an identical address signature---how the per-source shared address shows up---and $\bar s(r)$ are records of the other source pointing at the same S1. Stage~2 trains on out-of-fold stage-1 scores, so it never sees scores fitted to its own labels. Figure~\ref{fig:importance} shows that stage~2 is dominated by the margin to the best rival S1, a quantity no pairwise model can compute.
+where $\operatorname{sib}(r)$ are records of the same source with an identical address signature---how the per-source shared address shows up---and $\bar s(r)$ are records of the other source pointing at the same S1. Stage~2 trains on out-of-fold stage-1 scores, so it never sees scores fitted to its own labels.
+
+\paragraph{Negatives.} Stage 1 is trained on the natural candidate distribution: every retrieved non-matching pair is a negative. 98.7\% of these 12.6M negatives receive an out-of-fold score below 0.01 and contribute almost no gradient; the 60k that score $\ge 0.1$ are the near-miss decoys and same-name collisions. Re-weighting them fivefold (E-08) left macro $\Fh$ unchanged to four decimals both before and after stage 2: the second stage already extracts what the hard negatives contain. Figure~\ref{fig:importance} shows that stage~2 is dominated by the margin to the best rival S1, a quantity no pairwise model can compute.
 
 \begin{figure}[htbp]
 \centering
@@ -230,7 +266,12 @@ The threshold is chosen on out-of-fold scores of the training subset, never on v
 a(r) = \emptyset \quad \text{if} \quad p_2^{(1)}(r) - p_2^{(2)}(r) < 0.1 \text{ across blocks.}
 \label{eq:margin}
 \end{equation}
-Macro $\Fh$ is flat between $\tau = 0.55$ and $0.75$ (Figure~\ref{fig:tau}), so the result is not sensitive to the exact threshold. Three more elaborate decision rules were tested and rejected: a top-1 minus top-2 margin ($-0.0001$), a per-S1 expected-$\Fh$ prefix rule ($+0.0004$, and it lowered singleton $\Fh$ from 0.920 to 0.884), and isotonic calibration ($+0.0001$). Stage~2 already performs the entity-level reasoning these rules attempt.
+\paragraph{Why a global threshold near 0.65 is close to optimal.} Consider one S1 entity whose accepted list has $k$ records with calibrated probabilities $p_1\ge\dots\ge p_k$, $S=\sum_{i\le k}p_i$, and let $T=\sum_{\text{all candidates}}p_i$ estimate the number of true matches. With $\mathbb{E}[\Fh]\approx 1.25\,S/(0.25\,T+k)$, appending the next candidate $p_{k+1}$ raises the expectation iff
+\begin{equation}
+p_{k+1} > \frac{S}{0.25\,T+k} = 0.8\;\mathbb{E}[\Fh]_k .
+\label{eq:marginal}
+\end{equation}
+So the right acceptance threshold is not a constant but $0.8$ times the entity's current expected score. For entities whose accepted prefix already scores $0.80$--$0.90$, which is where almost all the mass sits, eq.~\ref{eq:marginal} accepts exactly when $p > 0.64$--$0.72$. The globally tuned $\tau^*=0.65$ lies inside that band, which is why the explicit per-entity rule (E-12) recovered only $+0.0004$ over the global threshold: the constant is already the right one for the bulk of entities. Macro $\Fh$ is flat between $\tau = 0.55$ and $0.75$ (Figure~\ref{fig:tau}), so the result is not sensitive to the exact value. Three more elaborate decision rules were tested and rejected: a top-1 minus top-2 margin ($-0.0001$), a per-S1 expected-$\Fh$ prefix rule ($+0.0004$, and it lowered singleton $\Fh$ from 0.920 to 0.884), and isotonic calibration ($+0.0001$). Stage~2 already performs the entity-level reasoning these rules attempt.
 
 \begin{figure}[htbp]
 \centering
@@ -284,6 +325,8 @@ E-07b & legal-form and OOV features & 0.9699 & $+0.0094$ & keep \\
 E-10a & stage 2: competition & 0.9714 & $+0.0015$ & part of stage 2 \\
 E-10 & $+$ siblings & 0.9721 & $+0.0007$ & part of stage 2 \\
 E-11 & $+$ cross-source support & \textbf{0.9727} & $+0.0027$ (stage 2) & keep \\
+E-08 & hard-negative weighting ($\times5$, OOF $p\ge0.1$) & 0.9699 & $+0.0000$ & reject \\
+E-11h & stage 2 on E-08 & 0.9727 & $+0.0000$ & reject \\
 E-04b & posting cap 300 & & $3\times$ join volume & reject (memory) \\
 E-05c & name 5-gram retrieval (empty address) & recall 0.976 & name-only $+9.2$ pt & gate passed \\
 E-07c & $+$ 5-gram candidates and features & 0.9707 & $+0.0008$ & reject (7.2 GB) \\
@@ -345,9 +388,27 @@ Candidates per S1 & 3.9 (stage 2) & 57.0 \\
 \label{fig:fbyk}
 \end{figure}
 
+\section{Error Anatomy}
+\label{sec:anatomy}
+On DEV-VAL the final model leaves a loss of $\sum_e(1-\Fh(e)) = 6,996$ over 255,858 entities (mean $0.027$). 213,167 entities (83.3\%) are scored perfectly and 2,126 (0.8\%) score zero. Singletons account for only 505 of the loss: 505 of 14,407 singletons (3.5\%) receive a prediction. Figure~\ref{fig:anatomy} decomposes the two error types.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{anatomy.png}
+\caption{Where the remaining errors come from (DEV-VAL, final model). Left: false negatives by pipeline stage. Right: false positives by relation between the accepted record and the S1.}
+\label{fig:anatomy}
+\end{figure}
+
+\paragraph{False negatives are a retrieval problem.} 26,450 of the 43,416 missed pairs (61\%) were never proposed as candidates; only 16,581 were retrieved and rejected by the scorer, and 385 were given to a rival S1. By stratum, misses are concentrated where the name carries no information: 13,629 of 40,013 empty-address positives (34.1\%) and 5,768 of 67,556 address-only positives (8.5\%) are missed, against 21,417 of 730,178 normal positives (2.9\%). The character 5-gram retriever recovered a third of the empty-address misses at the candidate stage, but the scorer could not accept them without address evidence (E-07c), so the loss here is structural: a record with an empty address and a common name is genuinely ambiguous.
+
+\paragraph{False positives are no longer the decoys.} The near-miss decoys that dominate the raw data (Figure~\ref{fig:house}) are now 13\% of false positives (1,145 pairs); the house-number features and stage 2 have removed most of them. The largest remaining class, 42\% (3,694 pairs), is a record with a \emph{dissimilar} name at a \emph{similar} address: the out-of-vocabulary feature admits genuine rebrands, and the price is co-located businesses whose names the model cannot tell apart. The second class, ``similar name'' (23\%), is the same-name-different-street collisions inside a city. Both are precision losses that only better name evidence, not better address evidence, could reduce.
+
 \section{Generalisation to an Unseen Country}
 \label{sec:france}
 France makes up 15\% of the test set and has no labels. We estimate the transfer penalty by training on one labelled country and testing on the other (Figure~\ref{fig:fbyk}, right). The penalty is small from India to the US ($-0.014$) and larger from the US to India ($-0.053$), because India carries phenomena the US lacks: native scripts, injected number prefixes and free-form addresses. France is Latin-script with structured street addresses, closer to the US case, so we expect a penalty between these values. The design limits the exposure: there is no country feature, every normalisation rule except the Indic dictionary is script- and language-agnostic, and French legal forms (SARL, SAS, SASU, EURL, SCI, SA, SNC) are handled as legal forms.
+
+\section{Related Work}
+Probabilistic record linkage goes back to Fellegi and Sunter~\cite{fellegi}, who showed that the optimal linkage rule thresholds a likelihood ratio over field agreements; our stage 1 is a learned, non-linear version of that rule, and eq.~\ref{eq:marginal} is the analogous optimal threshold for a macro list metric. Blocking as a recall/cost trade-off is surveyed by Papadakis et al.~\cite{papadakis}; our typed-token index with a document-frequency cap is a standard token-blocking scheme, and the measured cost model above is what the survey recommends reporting. Feature-based learned matchers such as Magellan~\cite{magellan} and neural matchers such as DeepMatcher~\cite{deepmatcher} and Ditto~\cite{ditto} are the two dominant families; we chose the former because the decisive signal here (the house-number relation) is a structured comparison that a string encoder must rediscover from characters, and because a 70M-pair cross-encoder pass does not fit a laptop. What is not standard is the second stage: treating a record's rival candidates, its same-source siblings and the other source as features of the pair, which converts a pairwise classifier into an entity-level one without graph propagation. LightGBM~\cite{lightgbm} is used for both stages.
 
 \section{Compute and Reproducibility}
 All runs used a 12-core laptop with 16\,GB RAM and no GPU (Table~\ref{tab:compute}). Every experiment appends one row to \texttt{experiments/experiments.csv} with its hypothesis, parent, metrics, confidence interval, runtime, peak memory and verdict. The pipeline reruns from the raw files with six commands. Only MIT, BSD or Apache-licensed libraries are used (polars, numpy, scipy, scikit-learn, rapidfuzz, LightGBM); no pretrained model, external dataset or lookup service is used.
@@ -373,14 +434,14 @@ Output writing & 1.73M rows, streamed by block & $<1$ min & $<4$ GB \\
 Stated plainly, in decreasing order of expected impact.
 \begin{enumerate}
 \item \textbf{France is unvalidated.} French street abbreviations (R.\ for Rue, Av.\ for Avenue, Bd for Boulevard, N\textsuperscript{o}, Bis and Ter) are not normalised; a map learned without labels from test-set co-occurrence is the obvious next step.
-\item \textbf{India retrieval.} About 44\% of false negatives were never retrieved. A character 5-gram name retriever was tested on the weakest stratum (empty-address records): it lifts their candidate recall from 78\% to 87\% but the end-to-end gain is only $+0.0008$, because the scorer cannot separate the extra candidates without address evidence. The remaining recall lever is therefore the scorer, not retrieval (oracle $\Fh$ 0.988 at full scale).
+\item \textbf{Retrieval-bound misses.} 61\% of false negatives were never retrieved, concentrated on empty-address and address-only records. A character 5-gram name retriever was tested on the weakest stratum (empty-address records): it lifts their candidate recall from 78\% to 87\% but the end-to-end gain is only $+0.0008$, because the scorer cannot separate the extra candidates without address evidence. The remaining recall lever is therefore the scorer, not retrieval (oracle $\Fh$ 0.988 at full scale).
 \item \textbf{Irreducible confusions.} True matches with a genuine house-number typo ($306\to308$) are indistinguishable from decoys; $\Fh$ correctly prefers rejecting them.
 \item \textbf{Threshold transfer.} $\tau$ was selected on development-scale scores. The flat curve around $\tau^*$ limits the risk, but block-scale calibration was not re-run.
 \item \textbf{Deviation from the admission rule.} The three stage-2 feature groups were admitted jointly although each alone fell below $+0.002$.
 \end{enumerate}
 
 \section{Conclusion}
-The largest gains came from understanding how the data was generated, not from model capacity. Comparing the set of house numbers instead of the first number was worth $+0.197$ on its own, and features modelling the decoy and rebrand operators added the precision that $\Fh$ rewards. A second stage that reasons over competing S1s, sibling records and the other source turns pairwise scores into entity-level decisions. A pre-registered admission rule kept the system small---eight components admitted, five rejected---and the result is macro $\Fh = 0.961$ on 1.94M unseen entities at full scale, from a pipeline that scores the whole test set in about 25 minutes on a laptop.
+The largest gains came from understanding how the data was generated, not from model capacity. Comparing the set of house numbers instead of the first number was worth $+0.197$ on its own, and features modelling the decoy and rebrand operators added the precision that $\Fh$ rewards. A second stage that reasons over competing S1s, sibling records and the other source turns pairwise scores into entity-level decisions. A pre-registered admission rule kept the system small---eight components admitted, seven rejected---and the result is macro $\Fh = 0.961$ on 1.94M unseen entities at full scale, from a pipeline that scores the whole test set in about 25 minutes on a laptop.
 
 \appendix
 \section{Experiment Log}
@@ -415,6 +476,8 @@ G3-full & train\_full & 0.9560 & 0.963 & 0.985 & 56.7 & 4.0 & INFO \\
 G3-full & train\_full & 0.9612 & 0.968 & 0.988 & 57.0 & 4.2 & KEEP \\
 E-05c & devval & 0.8541 & 0.976 & 0.991 & 46.7 & 4.9 & INFO \\
 E-07c & devval & 0.9707 & 0.976 & 0.991 & 46.7 & 7.0 & KILL \\
+E-08 & devval & 0.9699 & 0.971 & 0.990 & 46.3 & 9.3 & KILL \\
+E-11h & devval & 0.9727 & 0.970 & 0.989 & 3.9 & 4.4 & KILL \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -435,5 +498,15 @@ $\operatorname{sib}(r)$, $\bar s(r)$ & same-source siblings of $r$; records of t
 \bottomrule
 \end{tabular}
 \end{center}
+
+
+\begin{thebibliography}{9}\small
+\bibitem{fellegi} I.~P. Fellegi and A.~B. Sunter. A theory for record linkage. \emph{Journal of the American Statistical Association}, 64(328):1183--1210, 1969.
+\bibitem{papadakis} G. Papadakis, D. Skoutas, E. Thanos, and T. Palpanas. Blocking and filtering techniques for entity resolution: a survey. \emph{ACM Computing Surveys}, 53(2), 2020.
+\bibitem{magellan} P. Konda et al. Magellan: toward building entity matching management systems. \emph{PVLDB}, 9(12):1197--1208, 2016.
+\bibitem{deepmatcher} S. Mudgal et al. Deep learning for entity matching: a design space exploration. \emph{SIGMOD}, 2018.
+\bibitem{ditto} Y. Li, J. Li, Y. Suhara, A. Doan, and W.-C. Tan. Deep entity matching with pre-trained language models. \emph{PVLDB}, 14(1):50--60, 2020.
+\bibitem{lightgbm} G. Ke et al. LightGBM: a highly efficient gradient boosting decision tree. \emph{NeurIPS}, 2017.
+\end{thebibliography}
 
 \end{document}

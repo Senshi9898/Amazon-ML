@@ -261,3 +261,30 @@ if __name__ == "__main__":
     for f in (architecture, ablation, house, recall, tau, hist, importance, kdist, blocks, fbyk, transfer, equations):
         f()
     print(sorted(p.name for p in FIG.iterdir()))
+
+
+# ---------- 12. error anatomy (final model, DEV-VAL) ----------
+def anatomy():
+    A = json.load(open(HERE / "anatomy.json"))
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.6), gridspec_kw={"width_ratios": [1, 1.25]})
+    fn = A["fn"]; lab = ["never retrieved", "retrieved,\nscore below τ", "assigned to\nanother S1"]
+    v = [fn["not_retrieved"], fn["below_tau"], fn["given_to_other_s1"]]
+    axes[0].barh(range(3)[::-1], v, color=BLUE, height=0.6)
+    for i, x in zip(range(3)[::-1], v):
+        axes[0].text(x + 400, i, f"{x:,} ({x / fn['total']:.0%})", va="center", fontsize=7.5)
+    axes[0].set_yticks(range(3)[::-1], lab, fontsize=7.5); axes[0].set_xlim(0, max(v) * 1.45)
+    axes[0].set_title(f"False negatives ({fn['total']:,})", fontsize=8.5, loc="left"); axes[0].grid(axis="y", visible=False)
+    axes[0].set_xlabel("true pairs missed", fontsize=7.5)
+    fp = sorted(A["fp"].items(), key=lambda x: -x[1])
+    axes[1].barh(range(len(fp))[::-1], [x for _, x in fp], color=ORANGE, height=0.6)
+    for i, (k, x) in zip(range(len(fp))[::-1], fp):
+        axes[1].text(x + 60, i, f"{x:,} ({x / A['fp_total']:.0%})", va="center", fontsize=7.5)
+    axes[1].set_yticks(range(len(fp))[::-1], [k.replace(" (", "\n(") for k, _ in fp], fontsize=7)
+    axes[1].set_xlim(0, fp[0][1] * 1.5); axes[1].set_title(f"False positives ({A['fp_total']:,})", fontsize=8.5, loc="left")
+    axes[1].grid(axis="y", visible=False); axes[1].set_xlabel("wrong pairs accepted", fontsize=7.5)
+    fig.tight_layout(w_pad=1.5)
+    save(fig, "anatomy")
+
+
+if __name__ == "__main__":
+    anatomy()

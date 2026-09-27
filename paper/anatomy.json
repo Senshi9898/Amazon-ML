@@ -1,0 +1,40 @@
+{
+ "loss_total": 6995.6851324515155,
+ "n_s1": 255858,
+ "loss_singleton": 505.0,
+ "loss_by_country": {
+  "US": 4676.020810634352,
+  "India": 2319.6643218171635
+ },
+ "s1_perfect": 213167,
+ "s1_zero": 2126,
+ "fn": {
+  "total": 43416,
+  "not_retrieved": 26450,
+  "below_tau": 16581,
+  "given_to_other_s1": 385
+ },
+ "fn_by_stratum": {
+  "name_only": 13629,
+  "indic": 2602,
+  "addr_only": 5768,
+  "normal": 21417
+ },
+ "pos_by_stratum": {
+  "indic": 46936,
+  "addr_only": 67556,
+  "name_only": 40013,
+  "normal": 730178
+ },
+ "fp": {
+  "same name, empty address": 53,
+  "dissimilar name, similar address": 3694,
+  "similar name": 2033,
+  "record belongs to another S1": 822,
+  "same name, numbers agree": 1055,
+  "near-miss decoy (same name, number differs)": 1145
+ },
+ "fp_total": 8802,
+ "singletons_with_pred": 505,
+ "singletons": 14407
+}
