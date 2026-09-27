@@ -1,157 +1,106 @@
-# Final Architecture V4 — Business Entity Resolution (Team Grokking)
+# Final Research and Architecture Report — V4
 
-**Status:** implemented, measured, frozen, submitted. This document describes the system in `er/` exactly as it produced `submission/output/`. Every number is reproducible from the code and `experiments/experiments.csv`; `python -m er.forensics` reproduces the data facts in 12 seconds.
+**Status:** final evidence-bounded design decision. This report supersedes V3 where its descriptions conflict with the current source. It does not claim a newly trained, full-scale model or a reproduced competition score.
 
-V4 supersedes V2 (a research plan for a codebase that no longer exists in this repository) and V3 (a reduced plan of the same codebase). Both were reviewed; the useful ideas in them were tested and are recorded in the ablation table below.
+## Decision
 
----
+Use one LightGBM pair scorer with the corrected typed-token retrieval score, typed-token and exact-key candidate union, and deterministic **one-owner-per-target + NULL** assignment. Calibrate the global threshold on a calibration partition and report the result only on a separate locked audit partition. Keep the existing country partition and preprocessing. Do not use Stage 2 in the core. Do not add a France-specific model or threshold, character retrieval, new address parser, external data, embeddings, graph methods, or assignment optimization.
 
-## 1. Result
+This is the final redesign from the previous multi-stage direction. The main evidence-backed risk is **domain/scale transfer**: France constitutes 259,452 of 1,732,544 test S1 records and is absent from training labels; additionally, no representative full-scale run established candidate/index behavior or memory requirements. The supplied 0.951 current and 0.952 previous scores cannot be independently attributed or reproduced from artifacts in this workspace.
 
-**Final submitted configuration (E-11q, after the organisers' update that smaller candidate sets rank higher):** held-out macro F0.5 **0.9710** (CI 0.9706–0.9715), candidate set on test **38.5M pairs = 22.2 per S1** (median 19, p99 50; was 116M = 57 per S1). The table below is the unpruned configuration it was derived from.
+## Research conclusion and honest score range
 
-| Measure | Held-out states (DEV-VAL, 256k S1) | Full scale (1.94M S1 never trained on, test-identical pipeline) |
-|---|---|---|
-| **Macro F0.5** | **0.9727** (95% CI 0.9723–0.9731) | **0.9612** (95% CI 0.9610–0.9614) |
-| US / India | 0.974 / 0.970 | 0.971 / 0.947 |
-| Singletons | 0.965 | 0.952 |
-| Pair precision / recall | 0.990 / 0.951 | 0.985 / 0.931 |
-| Candidate recall / oracle F0.5 | 0.970 / 0.990 | 0.968 / 0.988 |
-| Rules baseline | 0.640 | — |
+The small, ratio-matched screening audits produced Stage 1 macro F0.5 between **0.9924 and 0.9947** on 600-S1 locked samples. These are not competition estimates: they use a 6,000-S1 sampled index and sampled target corpus, and have limited coverage of country and rare-error strata. In these audits, adding only the genuine typed-token `tfidf_score` improved macro F0.5 by **0.003383** and **0.001991** on two seeds without changing candidate volume or candidate recall. That supports keeping this single feature, not projecting the sample score to the competition.
 
-Test outputs pass the official validator (all rules, ID-existence check included). France (15% of test) has no labels; the cross-country proxy (train US → test India: −0.053; train India → test US: −0.014) bounds the expected penalty.
+The best evidence-bounded estimate for full evaluation is **approximately 0.95–0.96 macro F0.5** (a rough range, not a measured confidence interval), centered near the supplied 0.951–0.952 results. The evidence does **not** support promising 0.99 or 0.97–0.98 on the full task. The sample/full-domain gap, unlabeled France cohort, and absent full-scale reproduced run are the concrete reasons. A new score claim requires labels or an official scored evaluation; changing the split or metric would be invalid.
 
----
+## Completed forensic audit
 
-## 2. What the data is (measured facts that drive the design)
+### Ground truth and source-ID joins
 
-| Fact | Consequence |
-|---|---|
-| Each S2/S3 record belongs to at most one S1 (0 exceptions in 7.64M labels); S1 has 0–11 matches (mode 3); 5.6% singletons | Record → S1 retrieval; assignment enforces one owner per record |
-| 27% of S2/S3 are distractors; 35–45% of those are **near-miss decoys**: same name, city and street, house number shifted (US: |Δ| ≤ 10 in 63.7% of decoys vs 1.4% of true matches) | House-number relation over the **set of all numbers** is the core precision feature |
-| Addresses are corrupted **once per source** (siblings agree with each other 92% when they disagree with S1); names per record | Same-source sibling groups are entity-level evidence |
-| 24% of India / 8% of US positives share no Latin name token with S1 (Indic scripts, rebrands, `.com` forms) | Learned Indic→Latin dictionary (1,498 tokens, 96.4% test coverage); address-only path |
-| 97.7% of empty-address records are true matches | Never abstain on an empty address |
-| Country always agrees; no postal codes; no leakage in IDs or row order | Country partition; no ZIP keys; no ID features |
-| Operator rates differ by source (S2 US: state codes 94.5%; S3 US: full names 89.1%; S3 India reorders 30.7%) | Source is a feature; no country feature (France unseen) |
+The full GT/source-ID audit joined all 2,206,821 ground-truth S1 rows against source S1 and all 7,638,365 target mentions against the combined S2/S3 source table:
 
----
+| Check | Result |
+|---|---:|
+| Ground-truth S1 rows / unique S1 IDs | 2,206,821 / 2,206,821 |
+| GT target mentions / unique target IDs | 7,638,365 / 7,638,365 |
+| GT S1 IDs absent from source S1 | 0 |
+| GT target IDs absent from source S2/S3 | 0 |
+| Target IDs with multiple S1 owners | 0 |
+| Repeated target mentions beyond unique target IDs | 0 |
+| Duplicate source S1 IDs | 0 |
+| Duplicate S2/S3 target IDs across the target table | 0 |
 
-## 3. Pipeline (as implemented)
+This validates the source/label ID joins and supports one owner per target in the supplied training ground truth. It does not prove model correctness or test-label quality.
 
+### Leakage, OOF, and feature audit
+
+- Validation rows used to fit and score the earlier Stage 2 path; those scores were contaminated and are rejected.
+- A later shared-universe audit found that Stage 2-fit entities' in-sample Stage 2 predictions participated in owner competition. Those ratio-matched Stage 2 claims are also rejected.
+- Strict three-fold cross-fitted Stage 2 owner experiments were run on two independent seeds. Seed 2 moved from Stage 1 **0.994138** to Stage 2 **0.994617** (+0.000479); seed 3 moved from **0.992561** to **0.991372** (−0.001189). The two-seed mean change is negative, so Stage 2 is excluded.
+- Training negative sampling excludes held-out positive target IDs. Calibration and audit S1 groups are separated. Candidate retrieval is unsupervised; sampled candidate-index limitations are retained as a scale caveat.
+- Candidate union order had been exposed as if it were retrieval rank. That pseudo-rank and the default retrieval score are neutralized. The real typed-token weighted retrieval score is stored per candidate and exposed as `tfidf_score`; exact-only candidates receive zero for that feature.
+- Target competition must use each target's highest-scoring S1 owner and threshold to either that owner or NULL. Ties are deterministic. S1 capacity remains unlimited. The target-side runner-up margin is not in core; the source-side gap-to-best is a different statistic and does not replace it.
+- The independent macro F0.5 scorer matched the README formula on the bounded audits. It includes every S1, including singletons, and treats empty prediction/empty truth as score 1. No metric implementation defect was found.
+- The full source-ID audit found no join, duplicate-owner, or duplicate-mention anomaly.
+
+### Controlled evidence retained in the decision
+
+| Change | Before → after macro F0.5 | Candidate recall / volume | Precision and recall effect | Runtime / peak memory | Decision |
+|---|---|---|---|---|---|
+| Add genuine typed-token `tfidf_score`, seed 2 | 0.991286 → 0.994669 | unchanged; audit 2,103/2,103; no edge change | P 0.996627 → 0.997118; R 0.983357 → 0.987161 | 62.4 s / 727.1 MiB | Retain provisionally |
+| Same feature, independent seed 3 | 0.990398 → 0.992389 | unchanged; audit 2,088/2,089; no edge change | P 0.996109 → 0.996137; R 0.980373 → 0.987554 | 63.0 s / 616.8 MiB | Retain provisionally |
+| Strict OOF Stage 2, seed 2 | 0.994138 → 0.994617 | unchanged | P 0.997114 → 0.997120; R 0.985735 → 0.987637 | 59.6 s / 510.6 MiB | Not enough to retain alone |
+| Strict OOF Stage 2, seed 3 | 0.992561 → 0.991372 | unchanged | P 0.998055 → 0.992799; R 0.982767 → 0.989947 | 56.2 s / 646.6 MiB | Reject; mean effect negative |
+| Typed + exact key deduplication, cumulative seed 2 | 0.989604 → 0.990522 | unchanged; no material candidate growth | P 0.992768 → 0.993263; R 0.979078 → 0.981455 | 75.0 s / 754.4 MiB | Retain provisionally; bounded sample only |
+| Character retrieval 3–5 | 0.999820 → 0.999872 oracle ceiling on an earlier screen | +1 true pair / +81,654 edges | Candidate-pair precision 3.667% → 2.123% | Not comparable to final arms | Reject from core; tiny recall gain, large volume |
+| Stage 2 top-five hard negatives | 0.990937 → 0.990571 | unchanged | P 0.991392 → 0.991404; R 0.985735 → 0.987161 | 80.7 s / 686.2 MiB | Reject; macro decreased |
+
+All experimental scores above are sampled screening evidence. They are not directly comparable across harness versions or to the reported 0.951/0.952. The experiment ledger records the split, candidates, score, precision/recall, time, memory, and disposition for each experiment; superseded and invalidated runs remain labeled as such.
+
+## Final architecture
+
+```text
+Raw source rows and IDs retained
+        ↓
+Existing deterministic normalization, transliteration, legal-form and number views
+        ↓
+Exact country partition (US / India / France; no country-specific model)
+        ↓
+Typed-token retrieval + exact-key retrieval
+        ↓
+Deduplicated candidate union with actual typed-token TF-IDF score per candidate
+        ↓
+Existing Stage 1 pairwise feature set + LightGBM
+        ↓
+For each S2/S3 target: best-scoring S1 owner; accept above global threshold, else NULL
+        ↓
+Per-S1 predictions, including singleton S1s
+        ↓
+Candidate-constrained output generation and official submission validator
 ```
-TSV → Parquet                                   er/data.py
-   ↓
-Views: name (unaccent, unwrap DBA/formerly, strip ID tags, segment domains,
-       Indic→Latin dictionary, legal-form set) ; address (token set, street
-       tokens, set of all numbers)              er/views.py
-   ↓
-Country partition → state blocks of ≈150k S1 (learned component→state map;
-       stateless records go to every block of their country)   er/pipeline.py
-   ↓
-Retrieval, record → S1, top-8 each:
-   R-sparse  typed-token TF-IDF (name, address, number, number+street,
-             number+name tokens; df ≤ 100)      er/retrieve.py
-   R-exact   sorted name key, number+street, number+name (≤ 50 S1/key)  er/rules.py
-   ↓ union → prune: keep TF-IDF score ≥ 0.5 × record best, or record's most shared exact keys
-   ↓ cap: each S1 keeps its 50 best candidates (removes generic-name hubs)
-   = candidate_pairs.tsv (22.2 per S1 on test)   er/features.candidates
-Stage 1: 35 pair features → LightGBM            er/features.py, er/learn.py
-   name · address · house-number relation · legal form · OOV share · retrieval · context
-   ↓ keep p1 ≥ 0.01 (8% of pairs, 99.94% of retrieved positives)
-Stage 2: +10 entity features on out-of-fold stage-1 scores → LightGBM   er/stage2.py
-   runner-up, margin, rank · same-source siblings · other-source support
-   ↓
-Assignment: record → argmax S1 if p2 ≥ τ* = 0.65 (τ chosen on OOF macro F0.5);
-   stateless records abstain unless best block wins by 0.1     er/pipeline.assign
-   ↓
-matching_results.tsv, candidate_pairs.tsv → official validator
-```
 
-Full test inference: 13 state blocks, 38.5M candidate pairs after pruning (116M before), ≈20 min, ≤ 7 GB RAM, 12-core laptop, no GPU, no pretrained model, no external data.
+### Included
 
----
+- Existing normalization, transliteration, address-number and legal-form features.
+- Exact country routing: source audit found zero missing or unexpected country labels. France follows the same general model path; no France labels exist for supervised calibration.
+- Existing typed-token and exact-key retrieval with token/key deduplication and deterministic tie breaks.
+- Actual typed-token retrieval score (`tfidf_score`); union-order rank and fake/default retrieval score are not model evidence.
+- Stage 1 LightGBM only.
+- At most one S1 owner per target ID, with NULL when the winning score is below threshold. S1 may own multiple target IDs.
+- Threshold selected on calibration S1s and frozen before locked audit evaluation.
+- Candidate-constrained output and official format validation.
 
-## 4. Component decisions (every one measured)
+### Explicitly excluded
 
-| ID | Component | Macro F0.5 (DEV-VAL) | Δ | Decision |
-|---|---|---|---|---|
-| E-00 | rules baseline | 0.6397 | | baseline |
-| E-01 | name noise inversion (DBA/formerly, ID tags, domains) | 0.6470 | +0.0073 | keep |
-| E-02 | all-number address set (vs first number) | 0.8367 | **+0.1970** | keep |
-| E-03 | Indic→Latin dictionary | 0.6519 | +0.0049 (Indic recall 0.37→0.98) | keep |
-| E-04a | combined views, exact keys top-8 | 0.8581 | | reference |
-| E-04 / E-05 | TF-IDF retrieval ∪ exact keys | recall 0.906 → 0.971 | | keep |
-| E-07 | LightGBM stage 1 | 0.9605 | +0.1064 | keep |
-| E-07b | legal-form relation + OOV share | 0.9699 | +0.0094 | keep |
-| E-10a/E-10/E-11 | stage 2: competition, siblings, cross-source | **0.9727** | +0.0027 (CIs disjoint) | keep (as one component) |
-| G3-full | frozen config at full scale, state blocks + cross-block margin | 0.9612 | | confirmation |
-| E-11p | rule-based pruning (0.5 × record best or best exact) | 0.9712 | −0.0015, 46.3 → 14.0 cands/S1 | keep (organisers' update) |
-| **E-11q** | **+ cap 50 candidates per S1** | **0.9710** | −0.0001, 13.6 cands/S1, max 50 | **final** |
-| E-09 | top-1 − top-2 margin | 0.9604 | −0.0001 | reject |
-| E-12 | per-S1 expected-F0.5 decision rule | 0.9609 | +0.0004 | reject |
-| E-13 | isotonic calibration | 0.9607 | +0.0001 | reject |
-| E-04b | posting cap 300 | — | 3× join volume | reject (memory) |
-| E-05c / E-07c | character 5-gram name retrieval (from V2/V3) | recall 0.976 / 0.9707 | +0.0008, 7.2 GB | reject |
-| E-08 / E-11h | hard-negative weighting ×5 (from V3) | 0.9699 / 0.9727 | +0.0000 | reject |
-| E-06 | dense multilingual retrieval | — | ≤ 1% headroom | not run |
+Stage 2, source-side rank masquerading as target margin, cross-source support with unresolved double counting, character retrieval, address-specific retrieval/parser, state/city/postal extraction, embeddings, cross-encoders, graph propagation, BM25/RRF, LLMs, external data, geocoding, and Hungarian assignment. None has adequate final-scale evidence here; some arms directly reduced macro F0.5 or expanded candidate volume substantially.
 
-Admission rule (fixed before the first experiment): keep only if DEV-VAL gain ≥ +0.002, no regression on the cross-country proxy, within budget (≤ 6 GB, ≤ 15 min per dev run).
+## Implementation and reproducibility status
 
-**Why full scale is 0.011 below dev:** stateless records compete with same-name S1s in every state at full scale but only with their owner's states in the dev subsets. Fixed as far as measurable (misc-state S1 routing, cross-block margin: 0.956 → 0.961); the rest is the honest cost of scale.
+The live source implements candidate score retention, the `tfidf_score` feature, one-owner-plus-NULL assignment, separate calibration/audit groups, and excludes held-out positive targets from sampled training negatives. The training path saves `use_stage2=false`; inference rejects incompatible schema/config artifacts. `models/config.json` and saved model pickles are stale (schema 5 incompatibility) and must not be presented as the trained V4 model. A full training/retraining and test inference were not run in this finalization. The output directory was empty when audited, so the official submission validator cannot yet confirm a final prediction package.
 
----
+Full-scale operational evidence is also absent. The host has 16 GiB RAM, while eager representations over 12.5M training source rows create meaningful memory risk. Any later release run must record source revision, model/config hashes, threshold, candidate count/recall, per-country counts, precision/recall/macro F0.5 on the locked labeled audit, wall time, peak RSS, validator result, and output hashes. Do not use the sample scores in place of the official metric.
 
-## 5. Validation design
+## Final conclusion
 
-- Split by **whole US and Indian states** (DEV-TRAIN 271k S1 / DEV-VAL 256k S1), so near-miss decoys and same-name collisions stay in the same split as the entities they imitate. DEV-VAL matches the full data: 5.6% singletons, 26% distractors, 4.68 records per S1.
-- Stage 2 trained only on out-of-fold stage-1 scores; τ chosen on training-subset OOF scores; DEV-VAL never used for fitting or tuning.
-- Full-scale confirmation: frozen pipeline run on the whole training set, scored on the 1.94M S1 outside DEV-TRAIN states.
-- France proxy: train on one country, test on the other.
-
----
-
-## 6. Where the remaining loss is (DEV-VAL, final model)
-
-- False negatives (43,416): 61% never retrieved, 38% retrieved but below τ, 1% given to a rival S1. Concentrated on empty-address (34% missed) and address-only (8.5%) records; normal positives 2.9%.
-- False positives (8,802): dissimilar name at a similar address 42% (the price of admitting rebrands), similar name 23%, near-miss decoys now only 13%, record belonging to another S1 9%.
-- Singletons: 505 of 14,407 (3.5%) receive a prediction.
-
-The remaining loss is retrieval-bound on name-poor records; the one retrieval fix tested (char 5-grams) recovers candidates the scorer cannot then separate.
-
----
-
-## 7. Submission package
-
-`submission/Grokking_submission.zip`
-```
-output/matching_results.tsv          scored file (also uploaded to the leaderboard)
-output/candidate_pairs.tsv           exact set fed to the matcher
-code/business_entity_resolution/src/er/   source (14 modules)
-code/business_entity_resolution/README.md, requirements.txt, docs/, experiments/
-Documentation_template.md            2-page methodology (team filled)
-Entity-Resolution-Whitepaper.pdf     14-page technical write-up
-```
-Licensing: polars, numpy, scipy, scikit-learn, rapidfuzz, LightGBM (MIT/BSD); ~100k parameters per stage.
-
----
-
-## 8. Known risks
-
-1. **France is unvalidated** (no labels). Expected penalty between −0.014 and −0.053; predicted structure (5.4% singletons, 3.45 matches/S1) matches training.
-2. **India retrieval** on name-poor records is the largest known loss and stays.
-3. **τ selected at development scale**; the flat F0.5 curve (0.55–0.75) limits the risk.
-4. The three stage-2 feature groups were admitted jointly (each alone < +0.002); recorded in the log.
-
----
-
-## 9. Reproduce
-
-```
-uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
-export ER_DATA=/path/to/student_resource/dataset
-.venv/bin/python -m er.data && .venv/bin/python -m er.split
-.venv/bin/python -m er.exp E-07b devval
-.venv/bin/python -m er.pipeline train && .venv/bin/python -m er.pipeline run test && .venv/bin/python -m er.pipeline finish test
-.venv/bin/python -m er.forensics
-```
+The GT/source-ID audit passes with zero anomalies. The score regression from 0.952 to 0.951 remains unlocalized because the supplied scores lack reproducible run artifacts and labels. The defensible architecture is the simpler Stage 1 system with corrected retrieval provenance and one-owner/NULL decisions. Stage 2 is rejected after leakage was found and strict OOF results failed to reproduce a gain. Sample audits support the `tfidf_score` feature but do not establish 0.99. The honest expected full-evaluation range is roughly 0.95–0.96 until a representative labeled/official run proves otherwise.

@@ -8,7 +8,7 @@ V4 supersedes V2 (a research plan for a codebase that no longer exists in this r
 
 ## 1. Result
 
-**Final submitted configuration (E-11q, after the organisers' update that smaller candidate sets rank higher):** held-out macro F0.5 **0.9710** (CI 0.9706–0.9715), candidate set on test **38.5M pairs = 22.2 per S1** (median 19, p99 50; was 116M = 57 per S1). The table below is the unpruned configuration it was derived from.
+**Final submitted configuration (E-11t):** held-out macro F0.5 **0.9824** (CI 0.9821–0.9827; pair precision 0.995, recall 0.964, singletons 0.983), candidate recall 0.983 at 13.7 candidates per S1 (oracle F0.5 0.994). E-11t = E-11s + TOKR: the training-label positive rate of the name tokens a record adds or drops relative to S1 (+0.0055, decoy false positives 7,715 → 3,575). Earlier uploads: E-11q 0.9710 held-out / 0.951 public leaderboard; E-11r 0.9763 / 0.955. E-11s adds the name-token query quota (E-07s), the French department→region map, a +0.10 test threshold for the test set's 1.9× decoy density, and cross-block pair de-duplication (+0.0009 at full scale). The table below is the unpruned E-11 configuration the line was derived from.
 
 | Measure | Held-out states (DEV-VAL, 256k S1) | Full scale (1.94M S1 never trained on, test-identical pipeline) |
 |---|---|---|
@@ -87,7 +87,10 @@ Full test inference: 13 state blocks, 38.5M candidate pairs after pruning (116M 
 | E-10a/E-10/E-11 | stage 2: competition, siblings, cross-source | **0.9727** | +0.0027 (CIs disjoint) | keep (as one component) |
 | G3-full | frozen config at full scale, state blocks + cross-block margin | 0.9612 | | confirmation |
 | E-11p | rule-based pruning (0.5 × record best or best exact) | 0.9712 | −0.0015, 46.3 → 14.0 cands/S1 | keep (organisers' update) |
-| **E-11q** | **+ cap 50 candidates per S1** | **0.9710** | −0.0001, 13.6 cands/S1, max 50 | **final** |
+| E-11q | + cap 50 candidates per S1 | 0.9710 | −0.0001, 13.6 cands/S1, max 50 | submitted (0.951 public) |
+| E-07r / E-11r | rarest-6 query tokens at cap 3000, abbreviation/state/ordinal expansion, dotted legal forms, all-pairs number relations, alignment features | 0.9763 | +0.0053, recall 0.967 → 0.981 at 13.8 cands/S1 | keep; submitted (0.955 public) |
+| E-07s / E-11s | + guaranteed quota of 3 rarest name tokens per query (a corrupted house number no longer empties the query: 6.7k exact-name positives were never retrieved) | 0.9769 | +0.0006, recall 0.981 → 0.983 at 13.7 cands/S1 | keep |
+| **E-11t** | **+ TOKR: positive rate (train labels, out of fold) of the name tokens the record adds / drops** — decoy vocabulary ("holdings", "industries", "ventures": 0%) vs corruption vocabulary ("center", "services": 35–45%) | **0.9824** | +0.0055 (CIs disjoint), precision 0.990 → 0.995 | **final** |
 | E-09 | top-1 − top-2 margin | 0.9604 | −0.0001 | reject |
 | E-12 | per-S1 expected-F0.5 decision rule | 0.9609 | +0.0004 | reject |
 | E-13 | isotonic calibration | 0.9607 | +0.0001 | reject |
@@ -99,6 +102,8 @@ Full test inference: 13 state blocks, 38.5M candidate pairs after pruning (116M 
 Admission rule (fixed before the first experiment): keep only if DEV-VAL gain ≥ +0.002, no regression on the cross-country proxy, within budget (≤ 6 GB, ≤ 15 min per dev run).
 
 **Why full scale is 0.011 below dev:** stateless records compete with same-name S1s in every state at full scale but only with their owner's states in the dev subsets. Fixed as far as measurable (misc-state S1 routing, cross-block margin: 0.956 → 0.961); the rest is the honest cost of scale.
+
+**Why the leaderboard is ≈0.02 below held-out (measured 27 Sep):** empty-address records among same-name S1 twins across states (0.010; 39% of S1s have a same-name twin in-country, and sibling-name consensus resolves them at coin-flip precision, so abstaining is right); the test set holds 5.75 records per S1 against 4.68 in train, i.e. 1.9× the unmatched-record density (0.0035, hence the +0.10 test threshold); duplicate pairs across blocks (0.001, fixed); France (unlabelled: 40% of French records carry a department where S1 carries the region, now mapped). Held-out loss itself splits evenly: retrieval misses 0.008, true matches below τ 0.008, decoy false positives 0.008.
 
 ---
 

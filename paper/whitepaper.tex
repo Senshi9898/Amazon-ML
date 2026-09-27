@@ -203,14 +203,17 @@ top-4 per retriever & 24.0 & 0.961 & 0.986 & \\
 top-2 per retriever & 12.0 & 0.947 & 0.980 & \\
 top-1 per retriever & 5.4 & 0.932 & 0.973 & \\
 score $\ge 0.5\times$ best, or best exact & 14.0 & 0.968 & 0.989 & 0.9712 \\
-\quad $+$ cap 50 per S1 (\textbf{final}) & \textbf{13.6} & \textbf{0.966} & \textbf{0.988} & \textbf{0.9710} \\
+\quad $+$ cap 50 per S1 (E-11q, submitted 0.951) & 13.6 & 0.966 & 0.988 & 0.9710 \\
+\quad $+$ rarest-6 query tokens at cap 3000, expansions (E-11r, 0.955) & 13.8 & 0.981 & 0.993 & 0.9763 \\
+\quad $+$ 3 rarest name tokens always queried (E-11s) & 13.7 & 0.983 & 0.994 & 0.9769 \\
+\quad $+$ token positive-rate features in stage 2 (E-11t, \textbf{final}) & \textbf{13.7} & \textbf{0.983} & \textbf{0.994} & \textbf{0.9824} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 On the test set the final rule yields 38.5M candidate pairs, 22.2 per S1 (median 19, 99th percentile 50), against 116M (57 per S1) unpruned: a reduction ratio of 0.999994 against all same-country pairs.
 
-The two retrievers fail on different records (Figure~\ref{fig:recall}): TF-IDF recovers address-only positives, exact name keys recover records with an empty address. Their union retrieves 97.1\% of true pairs, and a perfect scorer on this candidate set would reach $\Fh = 0.990$ (Table~\ref{tab:retrieval}).
+The two retrievers fail on different records (Figure~\ref{fig:recall}): TF-IDF recovers address-only positives, exact name keys recover records with an empty address. Their union retrieves 97.1\% of true pairs, and a perfect scorer on this candidate set would reach $\Fh = 0.990$ (Table~\ref{tab:retrieval}). Two later retrieval fixes raised this to 98.3\% and 0.994 at 13.7 candidates per S1: querying each record's six rarest tokens against a posting cap of 3000 (with record-side abbreviation, state and ordinal expansion), and always querying the three rarest \emph{name} tokens as well---the compound house+street and house+name tokens are the rarest by construction, so a corrupted house number had emptied the whole query and 6.7k held-out positives with an exact name match were never retrieved.
 
 \begin{figure}[htbp]
 \centering
@@ -348,7 +351,10 @@ E-10a & stage 2: competition & 0.9714 & $+0.0015$ & part of stage 2 \\
 E-10 & $+$ siblings & 0.9721 & $+0.0007$ & part of stage 2 \\
 E-11 & $+$ cross-source support & \textbf{0.9727} & $+0.0027$ (stage 2) & keep \\
 E-11p & rule-based candidate pruning & 0.9712 & $-0.0015$, $3.3\times$ fewer & keep \\
-E-11q & $+$ cap 50 candidates per S1 & \textbf{0.9710} & $-0.0001$ & \textbf{final} \\
+E-11q & $+$ cap 50 candidates per S1 & 0.9710 & $-0.0001$ & submitted (0.951) \\
+E-11r & rarest-6 query tokens at cap 3000, abbreviation/state/ordinal expansion, all-pairs number relations & 0.9763 & $+0.0053$ & submitted (0.955) \\
+E-11s & $+$ guaranteed quota of 3 rarest name tokens per query & 0.9769 & $+0.0006$, recall $0.981 \to 0.983$ & keep \\
+E-11t & $+$ TOKR: out-of-fold positive rate of the name tokens the record adds / drops (decoy vocabulary ``holdings'', ``industries'', ``ventures'': 0\%; corruption vocabulary ``center'', ``services'': 35--45\%) & \textbf{0.9824} & $+0.0055$, precision $0.990 \to 0.995$ & \textbf{final} \\
 E-08 & hard-negative weighting ($\times5$, OOF $p\ge0.1$) & 0.9699 & $+0.0000$ & reject \\
 E-11h & stage 2 on E-08 & 0.9727 & $+0.0000$ & reject \\
 E-04b & posting cap 300 & & $3\times$ join volume & reject (memory) \\
@@ -506,6 +512,11 @@ E-07p & devval & 0.9687 & 0.968 & 0.988 & 14.0 & 2.9 & INFO \\
 E-11p & devval & 0.9712 & 0.967 & 0.988 & 3.8 & 2.4 & KEEP \\
 E-07q & devval & 0.9687 & 0.967 & 0.988 & 13.6 & 3.1 & INFO \\
 E-11q & devval & 0.9710 & 0.966 & 0.988 & 3.8 & 2.5 & KEEP \\
+E-07r & devval & 0.9738 & 0.981 & 0.993 & 13.8 & 3.1 & KEEP \\
+E-11r & devval & 0.9763 & 0.980 & 0.993 & 3.9 & 2.7 & KEEP \\
+E-07s & devval & 0.9745 & 0.983 & 0.994 & 13.7 & 3.2 & KEEP \\
+E-11s & devval & 0.9769 & 0.982 & 0.994 & 3.9 & 2.7 & KEEP \\
+E-11t & devval & 0.9824 & 0.982 & 0.994 & 3.9 & 3.0 & KEEP \\
 \bottomrule
 \end{tabular}
 \end{center}

@@ -7,7 +7,7 @@
 ---
 
 ## 1. Executive Summary
-We reverse-engineered the data-generating process from the training labels before modelling. Candidate generation retrieves S1 entities for each S2/S3 record with typed-token TF-IDF plus exact structured keys, inside state-sized blocks. A two-stage LightGBM matcher scores each pair: stage 1 compares names, addresses and house numbers; stage 2 adds entity-level evidence (competing S1s, sibling records, the other source). Every record is assigned to at most one S1. Every component was kept or dropped by a pre-registered ablation on held-out states. Held-out macro F0.5 **0.971** with **22 candidates per S1** on the test set (3× fewer than without pruning).
+We reverse-engineered the data-generating process from the training labels before modelling. Candidate generation retrieves S1 entities for each S2/S3 record with typed-token TF-IDF plus exact structured keys, inside state-sized blocks. A two-stage LightGBM matcher scores each pair: stage 1 compares names, addresses and house numbers; stage 2 adds entity-level evidence (competing S1s, sibling records, the other source). Every record is assigned to at most one S1. Every component was kept or dropped by a pre-registered ablation on held-out states. Held-out macro F0.5 **0.982** (candidate recall 0.983, perfect-scorer ceiling 0.994) at **≈14 candidates per S1** on held-out states; **23 candidates per S1** on the test set.
 
 ---
 
@@ -29,28 +29,28 @@ Measured on the full training labels (`src/er/forensics.py` reproduces every num
 
 ## 3. Candidate Generation (Blocking)
 - **Normalisation:** unaccent, lower-case; unwrap DBA/formerly; strip ID tags; segment domain forms with the S1 vocabulary; Indic→Latin dictionary learned from aligned training pairs (1,498 tokens, 96.4% test coverage); set of all address numbers.
-- **Blocking keys used:** typed-token TF-IDF over name tokens, address tokens, numbers, number+street and number+name (df ≤ 100, top-8 S1 per record) ∪ exact keys (sorted name key, number+street, number+name; ≤50 S1 per key, top-8). Runs per country in blocks of ≈150k S1 so IDF and caps match the training scale; records without a parsable state are scored in every block of their country.
+- **Blocking keys used:** typed-token TF-IDF over name tokens, address tokens, numbers, number+street and number+name (df ≤ 3000; query = the record's 6 rarest tokens plus its 3 rarest name tokens, so a corrupted house number cannot empty the query; top-8 S1 per record). Record-side abbreviation, state (US codes, Indian names, French department→region) and ordinal expansion. ∪ exact keys (sorted name key, number+street, number+name; ≤50 S1 per key, top-8). Runs per country in blocks of ≈150k S1 so IDF and caps match the training scale; records without a parsable state are scored in every block of their country.
 - **Rule-based pruning (no model):** a candidate is kept only if its TF-IDF score is ≥ 0.5 × the record's best score, or it has the record's most shared exact keys; then each S1 keeps its 50 best candidates, which removes generic-name "hub" S1s that attract thousands of unrelated records.
 - **Candidate pairs generated:** 38.5M on the test set — **22.2 per S1** (median 19, 99th percentile 50); reduction ratio 0.999994 against all same-country pairs. 457 of 1.73M S1 have none.
-- **How true matches were not lost:** measured on held-out states — pruning + cap cut candidates 3.4× (46.3 → 13.6 per S1) while candidate recall moved 0.971 → 0.967 and the perfect-scorer ceiling 0.990 → 0.988; end-to-end macro F0.5 0.9727 → 0.9710. Top-k cuts were worse at every budget (top-2: 12 per S1 but ceiling 0.980). Character 5-gram retrieval was tested and rejected (+0.0008).
+- **How true matches were not lost:** measured on held-out states — pruning + cap cut candidates 3.4× (46.3 → 13.6 per S1) while candidate recall moved 0.971 → 0.967 and the perfect-scorer ceiling 0.990 → 0.988; the retrieval fixes then raised recall to 0.983 and the ceiling to 0.994 at 13.7 per S1. Top-k cuts were worse at every budget (top-2: 12 per S1 but ceiling 0.980). Character 5-gram retrieval was tested and rejected (+0.0008).
 
 ---
 
 ## 4. Matching Model
-**Features used (35 in stage 1, +10 in stage 2):**
+**Features used (43 in stage 1, +15 in stage 2):**
 - Name features: token Jaccard, token-set ratio, edit ratio, token counts, S1 name-key collisions, legal-form relation, out-of-vocabulary share.
 - Address features: token and street Jaccard, street token-set ratio, empty-address flag; house numbers: coverage of S1's numbers, missing/extra numbers, |Δ|, truncation.
-- Other: retrieval score/rank/exact hits, candidates per record and per S1, gaps to the record's best candidate, source. Stage 2: runner-up score, margin, rank, best sibling score, same/other-source support. No country feature (France is unseen).
+- Other: retrieval score/rank/exact hits, candidates per record and per S1, gaps to the record's best candidate, source. Stage 2: runner-up score, margin, rank, best sibling score, same/other-source support, and the training-label positive rate (out of fold) of the name tokens the record adds or drops relative to S1 — the generator swaps in decoy words from a fixed vocabulary ("holdings", "industries", "ventures": 0% positive over 40k+ pairs each) and corruption words from another ("center", "services": 35–45%); this group alone is +0.0055 macro F0.5 and cuts decoy false positives by 54%. No country feature (France is unseen).
 
 **Model type:** LightGBM binary classifier at each stage (127 leaves, 400 rounds); stage 2 trained on out-of-fold stage-1 scores.
-**Threshold selection method:** each record → its argmax S1 if p ≥ τ; τ = 0.65 chosen by maximising macro F0.5 on out-of-fold training scores; a 0.1 cross-block margin for records without a state.
+**Threshold selection method:** each record → its argmax S1 if p ≥ τ; τ = 0.70 chosen by maximising macro F0.5 on out-of-fold training scores, +0.10 on the test set (5.75 records per S1 against 4.68 in train = 1.9× the unmatched-record density; re-weighting held-out decoys by 1.9 moves the optimum to 0.75); a 0.1 cross-block margin for records without a state.
 
 ---
 
 ## 5. Results & Error Analysis
-- **F0.5 Score (macro):** final pruned configuration **0.971** on held-out states (256k S1, CI 0.971–0.972; unpruned 0.973); unpruned pipeline at full scale 0.961 on 1.94M unseen S1 (US 0.971, India 0.947). Rules baseline 0.640; ablation gains: all-number address set +0.197, learned scorer +0.106, legal/OOV features +0.009, stage 2 +0.003. Rejected (<+0.002): margins, per-S1 expected-F0.5 rule, calibration, char n-grams, hard-negative weighting.
+- **F0.5 Score (macro):** final configuration **0.982** on held-out states (256k S1, CI 0.9821–0.9827; pair precision 0.995, recall 0.964; singletons 0.983); earlier uploads scored 0.951 (held-out 0.971) and 0.955 (held-out 0.976) on the public leaderboard; the unpruned pipeline at full scale scored 0.961 on 1.94M unseen S1 (US 0.971, India 0.947). Rules baseline 0.640; ablation gains: all-number address set +0.197, learned scorer +0.106, legal/OOV features +0.009, stage 2 +0.003. Rejected (<+0.002): margins, per-S1 expected-F0.5 rule, calibration, char n-grams, hard-negative weighting.
 - **Common false positives:** near-miss decoys with a small house-number shift; address-matching records with dissimilar names.
-- **Common false negatives:** empty-address records whose name fits several S1s; records never retrieved (44% of misses); true matches with a genuine house-number typo (indistinguishable from decoys).
+- **Common false negatives:** empty-address records whose name fits several same-name S1s (39% of S1s have a same-name twin; unresolvable by construction, so the pipeline abstains); records never retrieved; true matches with a genuine house-number typo. Held-out loss splits evenly: retrieval misses 0.008, true matches below τ 0.008, decoy false positives 0.008.
 - **France:** train-on-US→test-on-India scores 0.912 vs 0.965, so an unseen country is expected to score below US/India; predicted France structure (5.4% singletons, 3.45 matches per S1) matches the training labels.
 
 ---
