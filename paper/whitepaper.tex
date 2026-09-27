@@ -28,7 +28,7 @@
 \maketitle
 
 \begin{abstract}
-\noindent Three independent sources describe the same businesses with different, deliberately corrupted names and addresses, and share no identifiers. For each record of the clean reference source S1, the task is to find every record in the noisy sources S2 and S3 that refers to the same business. Scoring is macro $\Fh$ per S1 entity, which weights precision twice as heavily as recall and counts every entity with no true match. We treat the problem as \emph{inverting a data-generating process}. Forensic analysis of 12.5M training records showed a small set of corruption operators and a population of adversarial \emph{near-miss decoys}: copies of real businesses with the house number shifted. The system retrieves candidates with typed-token TF-IDF and exact structured keys, scores pairs with a two-stage gradient-boosted model whose second stage reasons over whole entities, and assigns every record to at most one business. Every component was admitted by a pre-registered ablation rule. On 1.94M training entities never used for training, processed exactly as the test set is, the system reaches macro $\Fh = 0.961$ (US 0.971, India 0.947), up from 0.640 for a rules baseline; on held-out states at development scale it reaches 0.973.
+\noindent Three independent sources describe the same businesses with different, deliberately corrupted names and addresses, and share no identifiers. For each record of the clean reference source S1, the task is to find every record in the noisy sources S2 and S3 that refers to the same business. Scoring is macro $\Fh$ per S1 entity, which weights precision twice as heavily as recall and counts every entity with no true match. We treat the problem as \emph{inverting a data-generating process}. Forensic analysis of 12.5M training records showed a small set of corruption operators and a population of adversarial \emph{near-miss decoys}: copies of real businesses with the house number shifted. The system retrieves candidates with typed-token TF-IDF and exact structured keys, scores pairs with a two-stage gradient-boosted model whose second stage reasons over whole entities, and assigns every record to at most one business. Every component was admitted by a pre-registered ablation rule. On 1.94M training entities never used for training, processed exactly as the test set is, the system reaches macro $\Fh = 0.961$ (US 0.971, India 0.947), up from 0.640 for a rules baseline; on held-out states it reaches 0.973. The submitted configuration prunes the candidate set by rule to 22 candidates per S1 on the test set (3$\times$ fewer) at a held-out cost of 0.0017 ($\Fh = 0.971$).
 \end{abstract}
 
 \noindent\textbf{Keywords:} entity resolution; record linkage; blocking; learning to match; gradient boosting; macro $\Fh$; data forensics; transliteration.
@@ -188,6 +188,28 @@ For $N_c = 150{,}000$, a number+street token shared by 10 entities has $w = (\ln
 
 \paragraph{Cost model.} The join volume of R-sparse for a record $r$ is $\sum_{t\in T(r),\,\mathrm{df}_t\le c}\mathrm{df}_t$: the sum of posting-list lengths of its tokens under the cap $c$. Measured on a 256k-entity partition this is 131 postings per record at $c=100$, 389 at $c=300$ and 1,614 at $c=1{,}000$, so the cap is the single knob that trades recall for memory; at $c=100$ a 1.2M-record partition costs $\approx$157M join rows, processed in 16 record chunks so that no chunk exceeds 5\,GB. R-exact adds a bounded $\le 50$ postings per key. The union is at most $16$ S1 per record before deduplication, and 46 records per S1 on average after it.
 
+\paragraph{Candidate pruning.} Because smaller candidate sets are ranked higher in the final evaluation, the union is pruned by two rules that use no model: a candidate is kept only if its TF-IDF score is at least $0.5\times$ the record's best score or it has the record's most shared exact keys; then each S1 keeps its 50 best candidates, which removes generic-name ``hub'' S1s that otherwise attract up to 24{,}666 unrelated records. Relative pruning dominates plain top-$k$ at every budget (Table~\ref{tab:prune}).
+
+\begin{table}[htbp]
+\centering\small
+\caption{Candidate budget on DEV-VAL. ``Oracle'' is macro $\Fh$ of a perfect scorer on the candidate set; the last two rows are end-to-end with retrained models.}
+\label{tab:prune}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Candidate rule & Cand./S1 & Recall & Oracle $\Fh$ & Macro $\Fh$ \\
+\midrule
+top-8 per retriever (unpruned) & 46.3 & 0.971 & 0.990 & 0.9727 \\
+top-4 per retriever & 24.0 & 0.961 & 0.986 & \\
+top-2 per retriever & 12.0 & 0.947 & 0.980 & \\
+top-1 per retriever & 5.4 & 0.932 & 0.973 & \\
+score $\ge 0.5\times$ best, or best exact & 14.0 & 0.968 & 0.989 & 0.9712 \\
+\quad $+$ cap 50 per S1 (\textbf{final}) & \textbf{13.6} & \textbf{0.966} & \textbf{0.988} & \textbf{0.9710} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On the test set the final rule yields 38.5M candidate pairs, 22.2 per S1 (median 19, 99th percentile 50), against 116M (57 per S1) unpruned: a reduction ratio of 0.999994 against all same-country pairs.
+
 The two retrievers fail on different records (Figure~\ref{fig:recall}): TF-IDF recovers address-only positives, exact name keys recover records with an empty address. Their union retrieves 97.1\% of true pairs, and a perfect scorer on this candidate set would reach $\Fh = 0.990$ (Table~\ref{tab:retrieval}).
 
 \begin{figure}[htbp]
@@ -325,6 +347,8 @@ E-07b & legal-form and OOV features & 0.9699 & $+0.0094$ & keep \\
 E-10a & stage 2: competition & 0.9714 & $+0.0015$ & part of stage 2 \\
 E-10 & $+$ siblings & 0.9721 & $+0.0007$ & part of stage 2 \\
 E-11 & $+$ cross-source support & \textbf{0.9727} & $+0.0027$ (stage 2) & keep \\
+E-11p & rule-based candidate pruning & 0.9712 & $-0.0015$, $3.3\times$ fewer & keep \\
+E-11q & $+$ cap 50 candidates per S1 & \textbf{0.9710} & $-0.0001$ & \textbf{final} \\
 E-08 & hard-negative weighting ($\times5$, OOF $p\ge0.1$) & 0.9699 & $+0.0000$ & reject \\
 E-11h & stage 2 on E-08 & 0.9727 & $+0.0000$ & reject \\
 E-04b & posting cap 300 & & $3\times$ join volume & reject (memory) \\
@@ -424,7 +448,7 @@ Stage & Scale & Time & Peak memory \\
 Ingest TSV $\to$ Parquet & 24M records & 6 s & $<2$ GB \\
 Model training (both stages) & 13.6M training pairs & 2.7 min & 6.3 GB \\
 Scoring one state block & $\approx$150k S1, $\approx$0.9M records & 1.5--3 min & $\le 7$ GB \\
-Full test inference & 13 blocks, 116M candidate pairs & $\approx$25 min & $\le 7$ GB \\
+Full test inference & 13 blocks, 38.5M candidate pairs & $\approx$20 min & $\le 7$ GB \\
 Output writing & 1.73M rows, streamed by block & $<1$ min & $<4$ GB \\
 \bottomrule
 \end{tabular}
@@ -478,6 +502,10 @@ E-05c & devval & 0.8541 & 0.976 & 0.991 & 46.7 & 4.9 & INFO \\
 E-07c & devval & 0.9707 & 0.976 & 0.991 & 46.7 & 7.0 & KILL \\
 E-08 & devval & 0.9699 & 0.971 & 0.990 & 46.3 & 9.3 & KILL \\
 E-11h & devval & 0.9727 & 0.970 & 0.989 & 3.9 & 4.4 & KILL \\
+E-07p & devval & 0.9687 & 0.968 & 0.988 & 14.0 & 2.9 & INFO \\
+E-11p & devval & 0.9712 & 0.967 & 0.988 & 3.8 & 2.4 & KEEP \\
+E-07q & devval & 0.9687 & 0.967 & 0.988 & 13.6 & 3.1 & INFO \\
+E-11q & devval & 0.9710 & 0.966 & 0.988 & 3.8 & 2.5 & KEEP \\
 \bottomrule
 \end{tabular}
 \end{center}
