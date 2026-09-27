@@ -23,9 +23,10 @@ from .data import CACHE, ROOT, load, load_gt, load_recs, write_id_lists
 from .split import STATES, _components, _last_match, learn_comp_map, load_subset, s1_states
 from .views import addr_view, indic_dict, name_view, s1_vocab
 
-CFG = exp.config("E-11q")  # pruned candidates (organisers' update: smaller candidate sets rank higher)
+CFG = exp.config("E-11t")  # + token-rate stage-2 features; pruned candidates (organisers: smaller candidate sets rank higher)
 F1 = exp._feats(CFG)
-F2 = F1 + stage2.CTX2 + stage2.SIB + stage2.XSRC
+F2 = F1 + [f for g in CFG["stage2"] for f in getattr(stage2, g)]
+TOKR = "TOKR" in CFG["stage2"]
 MODELS = CACHE / "models"
 BLOCK = 150_000  # target S1 per block (dev subsets held 76k-180k S1 per country)
 
@@ -44,7 +45,9 @@ def train():
     m1.save_model(MODELS / "stage1.txt")
     del tr
     oof1 = pl.read_parquet(CACHE / "preds" / f"{CFG['preds']}_oof_devtrain.parquet")  # same config, saved by the parent run
-    t2 = exp._stage2_table(CFG, "devtrain", oof1)
+    t2, table = exp._stage2_table(CFG, "devtrain", oof1)
+    if TOKR:
+        table.write_parquet(MODELS / "token_rates.parquet")
     tau, curve = learn.choose_tau(learn.oof(t2, F2), s1te, trutht)
     learn.fit(t2, F2).save_model(MODELS / "stage2.txt")
     (MODELS / "meta.json").write_text(json.dumps({"tau": tau, "oof_f05": curve[tau], "F1": F1, "F2": F2}))
@@ -118,10 +121,13 @@ def block(split, b):
     vocab = s1_vocab(s1)
     s1v = addr_view(name_view(s1, CFG["name"], vocab, indic), CFG["addr"])
     rv = addr_view(name_view(recs, CFG["name"], vocab, indic), CFG["addr"])
-    c = features.candidates(CFG, s1v, rv)
     ppath = out / "pairs" / b
-    features.build(c, s1v, rv, ppath, feats=F1)
-    del c, s1v, rv
+    if not (ppath / "part-15.parquet").exists():  # stage-2-only reruns reuse the block's pair features
+        c = features.candidates(CFG, s1v, rv)
+        features.build(c, s1v, rv, ppath, feats=F1)
+        del c
+    nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
+    del s1v, rv
     m1, m2 = (lgb.Booster(model_file=str(MODELS / f)) for f in ("stage1.txt", "stage2.txt"))
     pairs = features.read(ppath)
     p1 = learn.predict(m1, pairs, F1)
@@ -132,6 +138,8 @@ def block(split, b):
     pairs = pl.scan_parquet(ppath / "*.parquet").join(keep.lazy().select("rec_id", "s1_id"),
                                                       on=["rec_id", "s1_id"], how="semi").collect()
     t2 = stage2.context(pairs, keep, stage2.addr_sig(recs))
+    if TOKR:
+        t2 = stage2.token_rates(t2, nts, ntr, pl.read_parquet(MODELS / "token_rates.parquet"))
     (out / "scores").mkdir(exist_ok=True)
     learn.predict(m2, t2, F2).write_parquet(out / "scores" / f"{b}.parquet")
     print(b, country, "S1", s1.height, "recs", recs.height, "cands", p1.height, "stage2", t2.height, flush=True)
@@ -139,12 +147,18 @@ def block(split, b):
 
 # ---------------- outputs ----------------
 XMARGIN = 0.1  # stateless records: abstain if another block's best is within this (+0.0025 at full scale)
+# The test set holds 5.75 records per S1 against 4.68 in train (1.9x the unmatched-record density);
+# re-weighting DEV-VAL decoys by 1.9 moves the best tau from 0.65 to 0.75 (+0.0006 at that density).
+TAU_SHIFT_TEST = 0.10
 
 
 def assign(scores, tau, out):
     """Record -> best S1 over all blocks if p >= tau. A stateless record is scored in every block of its
     country, where same-name S1s of other states compete: it abstains unless its best block wins by XMARGIN."""
     unr = pl.read_parquet(out / "rec_blocks.parquet").filter(pl.col("block").is_null()).select(rec_id="id")
+    # a "*" S1 (no parsable state) is scored in every block of its country: keep one score per pair
+    # (duplicates made the same pair its own runner-up under XMARGIN: +0.0009 at full scale)
+    scores = scores.group_by("s1_id", "rec_id").agg(pl.col("p").max())
     s = scores.filter(pl.col("p") >= tau)
     bad = (s.join(unr, on="rec_id", how="semi")
             .group_by("rec_id").agg(p1=pl.col("p").max(), p2=pl.col("p").sort(descending=True).get(1, null_on_oob=True))
@@ -153,7 +167,7 @@ def assign(scores, tau, out):
              .unique("rec_id", keep="first").select("s1_id", "rec_id"))
 def finish(split):
     out = _dir(split)
-    tau = json.loads((MODELS / "meta.json").read_text())["tau"]
+    tau = json.loads((MODELS / "meta.json").read_text())["tau"] + (TAU_SHIFT_TEST if split == "test" else 0)
     scores = pl.read_parquet(out / "scores" / "*.parquet")
     pred = assign(scores, tau, out)
     s1 = pl.read_parquet(out / "s1_blocks.parquet")
