@@ -1,25 +1,59 @@
-# Business Entity Resolution (Amazon ML Challenge 2026)
+# Business Entity Resolution — Amazon ML Challenge 2026
 
-Reproduces `output/matching_results.tsv` and `output/candidate_pairs.tsv` from the challenge data.
+**Team Grokking:** Divyanshu (team leader), Aaditya Rawat, Shristi Chandra
+
+For each clean reference business (S1), find every record in two noisy sources (S2, S3) that refers to the same business, across the US, India and France. Metric: macro F0.5 per S1 entity, singletons included.
+
+| | Macro F0.5 |
+|---|---|
+| Held-out states (256k S1) | **0.973** |
+| Full scale, 1.94M S1 never used for training, test-identical pipeline | **0.961** |
+| Rules baseline | 0.640 |
+
+Test outputs pass the official validator. Full test inference: ≈25 min, ≤ 7 GB RAM, 12-core laptop, no GPU, no pretrained model, no external data.
+
+## How it works
+
+1. **Forensics first.** The data is synthetic; we measured the corruption process (near-miss decoys with shifted house numbers, per-source address corruption, Indic transliteration, rebrands) before modelling. `python -m er.forensics` reproduces every fact in 12 s.
+2. **Views** undo the reversible corruptions: DBA/formerly unwrapping, ID tags, domain segmentation, a learned Indic→Latin dictionary, the set of all address numbers.
+3. **Retrieval** (record → S1, top-8): typed-token TF-IDF ∪ exact structured keys, inside state blocks of ≈150k S1 so features match the training scale. 97% of true pairs retrieved.
+4. **Stage 1** LightGBM over 35 pair features (house-number relation is the decisive one).
+5. **Stage 2** LightGBM over entity-level evidence computed from out-of-fold stage-1 scores: rival S1s, same-source siblings, the other source.
+6. **Assignment:** each record → its best S1 if p ≥ 0.65 (chosen on out-of-fold macro F0.5); at most one owner per record.
+
+Every component was admitted or rejected by a pre-registered ablation (≥ +0.002 on held-out states). See `FINAL_ARCHITECTURE_V4.md` for the full decision table and `Entity-Resolution-Whitepaper.pdf` for the write-up with figures, equations and error anatomy.
 
 ## Setup
 ```
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
-export ER_DATA=/path/to/student_resource/dataset   # default: ref/.../student_resource/dataset
+export ER_DATA=/path/to/student_resource/dataset   # folder containing train/ and test/
 ```
-Machine used: 12 CPU cores, 16 GB RAM. No GPU and no external data or services.
 
 ## Run (end to end)
 ```
 .venv/bin/python -m er.data                 # TSV -> Parquet (cache/raw)
 .venv/bin/python -m er.split                # DEV-TRAIN / DEV-VAL state subsets (cache/dev)
-.venv/bin/python -m er.exp E-07b devval     # builds DEV pair features + stage-1 OOF scores
-.venv/bin/python -m er.pipeline train       # fits stage-1 / stage-2 LightGBM + threshold (cache/models)
+.venv/bin/python -m er.exp E-07b devval     # DEV pair features + stage-1 out-of-fold scores
+.venv/bin/python -m er.pipeline train       # stage-1 / stage-2 LightGBM + threshold (cache/models)
 .venv/bin/python -m er.pipeline run test    # scores the test set in state blocks
 .venv/bin/python -m er.pipeline finish test # writes submission/output/*.tsv
+.venv/bin/python -m er.forensics            # reproduces the data facts
 ```
-Forensics: `.venv/bin/python -m er.forensics` reproduces the data facts.
-Validate: `python3 utils/validate_submission.py -m submission/output/matching_results.tsv -c submission/output/candidate_pairs.tsv -t <dataset>/test`
+Validate: `python3 utils/validate_submission.py -m submission/output/matching_results.tsv -c submission/output/candidate_pairs.tsv -t $ER_DATA/test`
+
+Any experiment in the registry: `.venv/bin/python -m er.exp E-11 devval` (ids in `er/exp.py`; results append to `experiments/experiments.csv`).
 
 ## Layout
-`er/` holds the source. `docs/RESEARCH_SPEC.md` has the method and the experiment protocol. `experiments/experiments.csv` logs every experiment.
+```
+er/                 source: data, split, views, retrieve, rules, features, learn, stage2, decide,
+                    exp (experiment registry), pipeline (full-scale blocks + outputs), metric, forensics
+docs/RESEARCH_SPEC.md          research contract: components, admission rule, validation protocol
+experiments/experiments.csv    every run: hypothesis, metrics, CI, runtime, memory, verdict
+paper/                         whitepaper source (LaTeX), figure scripts, figures
+FINAL_ARCHITECTURE_V4.md       the frozen architecture and its decision table
+Entity-Resolution-Whitepaper.pdf
+submission/                    2-page methodology document; outputs and zip are generated (not tracked)
+```
+
+## Requirements
+Python 3.12; polars, numpy, scipy, scikit-learn, rapidfuzz, LightGBM (pinned in `requirements.txt`; all MIT/BSD). Only the provided challenge data is used — no geocoding, registries or web lookups.
