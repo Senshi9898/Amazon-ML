@@ -35,6 +35,15 @@ EXPS = {  # id: (parent, hypothesis, change dict)
     "E-11p": ("E-07p", "stage 2 on pruned candidates", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07p"}),
     "E-07q": ("E-07p", "cap each S1 at its 50 best candidates (removes generic-name hubs)", {"s1cap": 50}),
     "E-11q": ("E-07q", "stage 2 on pruned + capped candidates", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07q"}),
+    "E-07r": ("E-07q", "recall fix: rarest-6 query tokens at cap 3000, abbreviation/state/ordinal expansion, "
+                       "dotted legal forms, all-pairs number relations, token-alignment features",
+              {"name": "V4", "addr": "A3", "cap": 3000, "q": 6, "fv": 4}),
+    "E-11r": ("E-07r", "stage 2 on E-07r", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07r"}),
+    "E-07s": ("E-07r", "guaranteed query quota for the rarest name tokens: a corrupted house number no longer "
+                       "empties the query (6.7k exact-name DEV-VAL positives were never retrieved)", {"qn": 3}),
+    "E-11s": ("E-07s", "stage 2 on E-07s", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07s"}),
+    "E-11t": ("E-11s", "positive rate of the swapped-in / dropped name tokens (train labels) separates decoy "
+                       "vocabulary from corruption vocabulary", {"stage2": ["CTX2", "SIB", "XSRC", "TOKR"]}),
     "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
              {"hardneg": 5.0}),
     "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
@@ -70,7 +79,7 @@ def config(exp_id):
 def _views(cfg, subset):
     s1, recs, truth = load_subset(subset)
     vocab = s1_vocab(s1) if cfg["name"] != "V1" else None
-    indic = indic_dict(exclude_s1=s1["id"], tag=f"ex_{subset}") if cfg["name"] == "V3" else None
+    indic = indic_dict(exclude_s1=s1["id"], tag=f"ex_{subset}") if cfg["name"] in ("V3", "V4") else None
     s1v = addr_view(name_view(s1, cfg["name"], vocab, indic), cfg["addr"])
     rv = addr_view(name_view(recs, cfg["name"], vocab, indic), cfg["addr"])
     return s1, recs, truth, s1v, rv
@@ -82,6 +91,10 @@ def _pairs_path(cfg, subset):
         key["prune"] = cfg["prune"]
     if cfg.get("s1cap"):
         key["s1cap"] = cfg["s1cap"]
+    if cfg.get("q"):
+        key["q"] = cfg["q"]
+    if cfg.get("qn"):
+        key["qn"] = cfg["qn"]
     if cfg["fv"] > 1:
         key["fv"] = cfg["fv"]
     return CACHE / "pairs" / f"{subset}_{hashlib.md5(str(sorted(key.items())).encode()).hexdigest()[:8]}.parquet"
@@ -97,7 +110,7 @@ def build_pairs(exp_id, subset):
 
 
 def _feats(cfg):
-    return {1: features.FEATS, 2: features.FEATS2, 3: features.FEATS3}[cfg["fv"]]
+    return {1: features.FEATS, 2: features.FEATS2, 3: features.FEATS3, 4: features.FEATS4}[cfg["fv"]]
 
 
 def run_learned(exp_id, subset):
@@ -162,27 +175,38 @@ def run_decision(exp_id, subset, preds_from="E-07"):
     log_experiment(exp_id, hyp, str(change), subset, {**bm, **m}, parent_id=parent, notes=notes)
 
 
-def _stage2_table(cfg, subset, p):
+def _stage2_table(cfg, subset, p, table=None):
     """Stage 2 only sees pairs stage 1 did not confidently reject (p >= FLOOR: 8% of pairs, 99.94% of
-    retrieved positives); everything below the floor stays rejected."""
+    retrieved positives); everything below the floor stays rejected.
+    TOKR: table = token rate table (from DEV-TRAIN labels); None -> build it from this subset's labels and
+    score its rows out of fold. Returns (table, rate_table)."""
     _, recs, _ = load_subset(subset)
     p = p.filter(pl.col("p") >= stage2.FLOOR)
     path = _pairs_path(cfg, subset)
     pairs = pl.scan_parquet(path / "*.parquet" if path.is_dir() else path).join(
         p.lazy().select("rec_id", "s1_id"), on=["rec_id", "s1_id"], how="semi").collect()
-    return stage2.context(pairs, p, stage2.addr_sig(recs))
+    t = stage2.context(pairs, p, stage2.addr_sig(recs))
+    if "TOKR" in cfg.get("stage2", []):
+        _, _, _, s1v, rv = _views(cfg, subset)
+        nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
+        del s1v, rv
+        oof = table is None
+        if oof:
+            table = stage2.token_table(t.select("rec_id", "s1_id", "y"), nts, ntr)
+        t = stage2.token_rates(t, nts, ntr, table, oof=oof)
+    return t, table
 
 
 def run_stage2(exp_id, subset):
     cfg = config(exp_id)
     feats = _feats(cfg) + [f for g in cfg["stage2"] for f in getattr(stage2, g)]
-    tr = _stage2_table(cfg, "devtrain", pl.read_parquet(CACHE / "preds" / f"{cfg['preds']}_oof_devtrain.parquet"))
+    tr, table = _stage2_table(cfg, "devtrain", pl.read_parquet(CACHE / "preds" / f"{cfg['preds']}_oof_devtrain.parquet"))
     s1t, _, trutht = load_subset("devtrain")
     oof = learn.oof(tr, feats)
     tau, curve = learn.choose_tau(oof, s1t.select(s1_id="id", country="country"), trutht)
     model = learn.fit(tr, feats)
     del tr
-    va = _stage2_table(cfg, subset, pl.read_parquet(CACHE / "preds" / f"{cfg['preds']}_{subset}.parquet"))
+    va, _ = _stage2_table(cfg, subset, pl.read_parquet(CACHE / "preds" / f"{cfg['preds']}_{subset}.parquet"), table)
     s1, recs, truth = load_subset(subset)
     s1e = s1.select(s1_id="id", country="country")
     scores = learn.predict(model, va, feats)

@@ -44,7 +44,15 @@ def chargrams(v, k=4, maxlen=48):
                 .filter(pl.col("tok").str.len_chars() == k).unique())
 
 
-def sparse(s1v, rv, topk=8, cap=100, n=16, tokens=tokens):
+NAME_CAP = 500  # df bound for the guaranteed name tokens (join volume: a generic name token is no key anyway)
+
+
+def sparse(s1v, rv, topk=8, cap=100, n=16, tokens=tokens, q=None, qn=None):
+    """q: keep only each record's q rarest tokens (by S1 df) as query terms; bounds join volume so a much
+    higher df cap can be used (cap 3000 / q 6 = 408 postings per record vs 131 at cap 100 / all tokens).
+    qn: guaranteed quota for the record's qn rarest *name* tokens. The compound house+street / house+name
+    tokens are always the rarest, so without it a corrupted house number empties the whole query (6.7k
+    DEV-VAL positives with an exact name match were never retrieved)."""
     ts = tokens(s1v)
     voc = (ts.group_by("country", "tok").agg(df=pl.len())
              .join(ts.group_by("country").agg(N=pl.col("id").n_unique()), on="country")
@@ -55,11 +63,17 @@ def sparse(s1v, rv, topk=8, cap=100, n=16, tokens=tokens):
     norm = post.group_by("s1").agg(ns=pl.col("w2").sum().sqrt())
     post = post.select("tid", "s1")
     w = voc.select("tid", "w2")
-    vk = voc.select("country", "tok", "tid")
+    vk = voc.select("country", "tok", "tid").join(ts.group_by("country", "tok").agg(df=pl.len()), on=["country", "tok"])
     out = []
+    n = max(n, -(-rv.height // 25_000))  # chunks of <= 25k records: the query x postings join is the peak
     for _, part in rv.with_columns(_c=pl.col("id").hash(seed=5) % n).group_by("_c"):
         # tokenise per chunk: the string token table for all records at once dominates peak RAM
-        g = tokens(part).join(vk, on=["country", "tok"]).select("tid", rec=_int_id())
+        g = tokens(part).join(vk, on=["country", "tok"])
+        if q:
+            g = g.sort("df")
+            g = pl.concat([g.group_by("id").head(q)] + ([g.filter(pl.col("tok").str.starts_with("n:") & (pl.col("df") <= NAME_CAP))
+                                                        .group_by("id").head(qn)] if qn else [])).unique()
+        g = g.select("tid", rec=_int_id())
         if g.height == 0:
             continue
         c = (g.join(post, on="tid").join(w, on="tid")

@@ -22,13 +22,18 @@ FEATS = [f for g in GROUPS.values() for f in g]
 GROUPS2 = {"LEGAL": ["leg_rel", "leg_add", "leg_del", "grp_add"], "OOV": ["oov"]}
 FEATS2 = FEATS + [f for g in GROUPS2.values() for f in g]
 FEATS3 = FEATS2 + ["ch_score", "ch_rank"]
+# fv=4: best number relation over ALL S1 x record number pairs (prefix/suffix truncation, one-digit
+# substitution, min |delta|) and name-token alignment (char similarity and OOV share of the unshared tokens:
+# a typo is OOV and char-close, a swapped-in decoy word is in-vocabulary and char-far)
+GROUPS4 = {"NUM2": ["n_prefix", "n_suffix", "n_subst1", "ndiff_min"], "ALIGN": ["uns_ratio", "uns_oov", "n_uns_s", "n_uns_r"]}
+FEATS4 = FEATS2 + [f for g in GROUPS4.values() for f in g]
 
 
 def candidates(cfg, s1v, rv):
     """Union of the configured retrievers -> rec_id, s1_id, sp_score, sp_rank, ex_hits (nulls = not retrieved)."""
     c = None
     if "sparse" in cfg["ret"]:
-        c = retrieve.sparse(s1v, rv, cfg["topk"], cfg["cap"]).rename({"score": "sp_score", "rank": "sp_rank"})
+        c = retrieve.sparse(s1v, rv, cfg["topk"], cfg["cap"], q=cfg.get("q"), qn=cfg.get("qn")).rename({"score": "sp_score", "rank": "sp_rank"})
     if "exact" in cfg["ret"]:
         e = rules.block(s1v, rv, cfg["addr"], cfg.get("ex_topk", cfg["topk"])).rename({"hits": "ex_hits"})
         c = e if c is None else c.join(e, on=["rec_id", "s1_id"], how="full", coalesce=True)
@@ -95,8 +100,26 @@ def _pairs(c, s1v, rv):
                   .when(pl.col("lt_1").list.len() == 0).then(2).when(pl.col("leg_add") == 0).then(3)
                   .when(pl.col("leg_del") == 0).then(4).otherwise(5),
     )
+    # fv=4 number relations over all pairs of numbers (small lists: cross them via explode + aggregate)
+    x = (p.select("rec_id", "s1_id", a=pl.col("nums_1"), b=pl.col("nums"))
+           .explode("a", empty_as_null=True).explode("b", empty_as_null=True).drop_nulls()
+           .with_columns(sa=pl.col("a").cast(pl.String), sb=pl.col("b").cast(pl.String)))
+    x = x.with_columns(
+        pre=(pl.col("sa").str.starts_with(pl.col("sb")) | pl.col("sb").str.starts_with(pl.col("sa"))) & (pl.col("a") != pl.col("b")),
+        suf=(pl.col("sa").str.ends_with(pl.col("sb")) | pl.col("sb").str.ends_with(pl.col("sa"))) & (pl.col("a") != pl.col("b")),
+        sub1=(pl.col("sa").str.len_chars() == pl.col("sb").str.len_chars()) & (pl.col("a") != pl.col("b"))
+             & ((pl.col("sa").str.split("").list.set_symmetric_difference(pl.col("sb").str.split(""))).list.len() <= 2),
+        d=(pl.col("a") - pl.col("b")).abs(),
+    ).group_by("rec_id", "s1_id").agg(n_prefix=pl.col("pre").any(), n_suffix=pl.col("suf").any(),
+                                      n_subst1=pl.col("sub1").any(), ndiff_min=pl.col("d").min())
+    p = p.join(x, on=["rec_id", "s1_id"], how="left")
+    uns_s = pl.col("nt_1").list.set_difference(pl.col("nt")); uns_r = pl.col("nt").list.set_difference(pl.col("nt_1"))
+    p = p.with_columns(n_uns_s=uns_s.list.len(), n_uns_r=uns_r.list.len(),
+                       uns_oov=uns_r.list.eval(~pl.element().is_in(VOC.implode())).list.mean(),
+                       _us=uns_s.list.sort().list.join(" "), _ur=uns_r.list.sort().list.join(" "))
     kw = dict(workers=-1, dtype="float32")
     p = p.with_columns(
+        uns_ratio=pl.Series(process.cpdist(p["_us"].to_list(), p["_ur"].to_list(), scorer=fuzz.ratio, **kw)),
         n_tsr=pl.Series(process.cpdist(p["nkey"].to_list(), p["nkey_1"].to_list(), scorer=fuzz.token_set_ratio, **kw)),
         n_ratio=pl.Series(process.cpdist(p["nkey"].to_list(), p["nkey_1"].to_list(), scorer=fuzz.ratio, **kw)),
         a_tsr=pl.Series(process.cpdist(p["stkey"].to_list(), p["stkey_1"].to_list(), scorer=fuzz.token_set_ratio, **kw)),
@@ -110,6 +133,8 @@ def build(c, s1v, rv, path, truth=None, n=16, feats=FEATS):
     keep = ["id", "country", "nt", "nkey", "st", "at", "nums", "lt"]
     s1v, rv = s1v.select(keep), rv.select(keep + ["src"])  # raw strings are not needed any more
     voc = s1v.select(pl.col("nt").explode(empty_as_null=True)).drop_nulls().unique().to_series()
+    global VOC
+    VOC = voc
     rv = rv.with_columns(oov=pl.col("nt").list.eval(~pl.element().is_in(voc.implode())).list.mean())
     c = c.with_columns(ncand_r=pl.len().over("rec_id"), ncand_s=pl.len().over("s1_id"),
                        sp_rel=pl.col("sp_score") / pl.col("sp_score").max().over("rec_id"))
