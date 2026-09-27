@@ -30,6 +30,9 @@ EXPS = {  # id: (parent, hypothesis, change dict)
     "E-05": ("E-04", "union with R-exact (C6) adds >=0.3pt recall (name-only records)", {"ret": "sparse+exact"}),
     "E-07": ("E-05", "a learned pair scorer (LightGBM, C7 features) beats rules", {"scorer": "gbdt"}),
     "E-07b": ("E-07", "legal-form relation + name OOV share separate decoys from positives", {"fv": 2}),
+    "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
+             {"hardneg": 5.0}),
+    "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
     "E-05c": ("E-05", "R-char (name 4-grams) on empty-address / uncovered records lifts name-only recall",
               {"ret": "sparse+exact+char"}),
     "E-07c": ("E-07b", "R-char candidates (+ch_score/ch_rank features) raise macro F0.5 >= +0.002",
@@ -95,6 +98,10 @@ def run_learned(exp_id, subset):
             subprocess.run([sys.executable, "-m", "er.exp", "--build", exp_id, sub], check=True)
     feats = _feats(cfg)
     tr = features.read(_pairs_path(cfg, "devtrain"))
+    if cfg.get("hardneg"):  # weights from the parent's OOF scores on the same training subset (DEV-VAL untouched)
+        base = pl.read_parquet(CACHE / "preds" / f"{EXPS[exp_id][0]}_oof_devtrain.parquet").rename({"p": "p0"})
+        tr = tr.join(base, on=["rec_id", "s1_id"], how="left").with_columns(
+            w=pl.when((pl.col("y") == 0) & (pl.col("p0") >= 0.1)).then(cfg["hardneg"]).otherwise(1.0).cast(pl.Float32)).drop("p0")
     s1t, _, trutht = load_subset("devtrain")
     oof = learn.oof(tr, feats)
     tau, curve = learn.choose_tau(oof, s1t.select(s1_id="id", country="country"), trutht)

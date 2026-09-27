@@ -12,7 +12,8 @@ ROUNDS = 400
 
 
 def fit(p, feats, seed=0):
-    ds = lgb.Dataset(p.select(feats).to_numpy(), label=p["y"].to_numpy(), feature_name=feats)
+    w = p["w"].to_numpy() if "w" in p.columns else None
+    ds = lgb.Dataset(p.select(feats).to_numpy(), label=p["y"].to_numpy(), weight=w, feature_name=feats)
     return lgb.train({**PARAMS, "seed": seed}, ds, ROUNDS)
 
 
