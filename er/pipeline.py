@@ -151,8 +151,9 @@ def block(split, b):
 # ---------------- outputs ----------------
 XMARGIN = 0.1  # stateless records: abstain if another block's best is within this (+0.0025 at full scale)
 # The test set holds 5.75 records per S1 against 4.68 in train (1.9x the unmatched-record density);
-# re-weighting DEV-VAL decoys by 1.9 moves the best tau from 0.65 to 0.75 (+0.0006 at that density).
-TAU_SHIFT_TEST = 0.10
+# re-weighting DEV-VAL decoys by 1.9 moved the best tau from 0.65 to 0.75 for E-11s; with the token-rate
+# features (E-11v, tau 0.70) the same re-weighting puts it at 0.75 again, i.e. a shift of 0.05.
+TAU_SHIFT_TEST = 0.05
 
 
 def assign(scores, tau, out):
