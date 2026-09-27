@@ -19,7 +19,10 @@ XSRC = ["s_hi_same", "s_hi_other", "s_max_other", "s_sum_other"]
 # swaps in decoy words from a fixed vocabulary ("holdings", "industries", "ventures": 0% positive over 40k+
 # pairs each) and corruption words from another ("center", "services": 35-45%); OOV share could not see this.
 TOKR = ["tr_min", "tr_max", "ts_min", "ts_max", "tr_n"]
+TOKA = ["ta_min", "ta_max", "tas_min", "tas_max"]  # same statistic on street tokens the record adds / drops
+TOKP = ["tp_rate", "tp_n"]  # rate of the exact substitution (S1 tokens dropped -> record tokens added)
 TOK_MIN_N = 5
+SIDES = {"r": ("uns_r", "tr"), "s": ("uns_s", "ts"), "ar": ("uns_ar", "ta"), "as": ("uns_as", "tas"), "p": ("pair", "tp")}
 
 
 def addr_sig(recs):
@@ -57,10 +60,17 @@ def context(pairs, p, sig):
 
 
 def _uns(d, nts, ntr):
-    """pairs + name-token lists -> tokens the record adds (uns_r) and drops (uns_s) relative to S1."""
-    return (d.select("rec_id", "s1_id").join(ntr, on="rec_id").join(nts, on="s1_id")
-              .with_columns(uns_r=pl.col("nt").list.set_difference("nt1"), uns_s=pl.col("nt1").list.set_difference("nt"))
-              .select("rec_id", "s1_id", "uns_r", "uns_s"))
+    """pairs + token lists -> tokens the record adds (uns_r) and drops (uns_s) relative to S1; the same for
+    street tokens (uns_ar / uns_as) when the lists carry `st`; and the substitution key (pair) when at most
+    two tokens change on each side."""
+    u = (d.select("rec_id", "s1_id").join(ntr, on="rec_id").join(nts, on="s1_id")
+           .with_columns(uns_r=pl.col("nt").list.set_difference("nt1"), uns_s=pl.col("nt1").list.set_difference("nt")))
+    if "st" in u.columns:
+        u = u.with_columns(uns_ar=pl.col("st").list.set_difference("st1"), uns_as=pl.col("st1").list.set_difference("st"))
+    small = (pl.col("uns_r").list.len() <= 2) & (pl.col("uns_s").list.len() <= 2) & (pl.col("uns_r").list.len() + pl.col("uns_s").list.len() > 0)
+    u = u.with_columns(pair=pl.when(small).then(pl.concat_list([pl.concat_str(
+        pl.col("uns_s").list.sort().list.join(" "), pl.lit(">"), pl.col("uns_r").list.sort().list.join(" "))])))
+    return u.select("rec_id", "s1_id", *[c for c in ("uns_r", "uns_s", "uns_ar", "uns_as", "pair") if c in u.columns])
 
 
 def token_table(d, nts, ntr, k=5):
@@ -69,7 +79,7 @@ def token_table(d, nts, ntr, k=5):
     u = _uns(d, nts, ntr).join(d.select("rec_id", "s1_id", "y"), on=["rec_id", "s1_id"])
     u = u.with_columns(fold=(pl.col("rec_id").hash(seed=17) % k).cast(pl.Int32))
     parts = [u.select("fold", "y", side=pl.lit(side), t=pl.col(col)).explode("t").drop_nulls("t")
-             for side, col in (("r", "uns_r"), ("s", "uns_s"))]
+             for side, (col, _) in SIDES.items() if col in u.columns]
     return pl.concat(parts).group_by("side", "t", "fold").agg(n=pl.len(), s=pl.col("y").sum())
 
 
@@ -78,14 +88,19 @@ def token_rates(d, nts, ntr, table, oof=False, k=5):
     u = _uns(d, nts, ntr).with_columns(fold=(pl.col("rec_id").hash(seed=17) % k).cast(pl.Int32))
     tot = table.group_by("side", "t").agg(N=pl.col("n").sum(), S=pl.col("s").sum())
     out = u.select("rec_id", "s1_id")
-    for side, col, pre in (("r", "uns_r", "tr"), ("s", "uns_s", "ts")):
+    for side, (col, pre) in SIDES.items():
+        if col not in u.columns or side not in table["side"].unique().to_list():
+            continue
         e = u.select("rec_id", "s1_id", "fold", t=pl.col(col)).explode("t").drop_nulls("t")
         e = e.join(tot.filter(pl.col("side") == side).drop("side"), on="t", how="left")
         if oof:
             e = e.join(table.filter(pl.col("side") == side).drop("side"), on=["t", "fold"], how="left") \
                  .with_columns(N=pl.col("N") - pl.col("n").fill_null(0), S=pl.col("S") - pl.col("s").fill_null(0))
         e = e.with_columns(rate=pl.when(pl.col("N") >= TOK_MIN_N).then(pl.col("S") / pl.col("N")))
-        g = e.group_by("rec_id", "s1_id").agg(**{f"{pre}_min": pl.col("rate").min(), f"{pre}_max": pl.col("rate").max(),
-                                                 **({"tr_n": pl.col("rate").is_not_null().sum()} if pre == "tr" else {})})
+        if pre == "tp":
+            g = e.group_by("rec_id", "s1_id").agg(tp_rate=pl.col("rate").first(), tp_n=pl.col("N").first().fill_null(0))
+        else:
+            g = e.group_by("rec_id", "s1_id").agg(**{f"{pre}_min": pl.col("rate").min(), f"{pre}_max": pl.col("rate").max(),
+                                                     **({"tr_n": pl.col("rate").is_not_null().sum()} if pre == "tr" else {})})
         out = out.join(g, on=["rec_id", "s1_id"], how="left")
     return d.join(out, on=["rec_id", "s1_id"], how="left")

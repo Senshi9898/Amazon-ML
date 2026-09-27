@@ -126,7 +126,10 @@ def block(split, b):
         c = features.candidates(CFG, s1v, rv)
         features.build(c, s1v, rv, ppath, feats=F1)
         del c
-    nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
+    if "TOKA" in CFG["stage2"] or "TOKP" in CFG["stage2"]:
+        nts, ntr = s1v.select(s1_id="id", nt1="nt", st1="st"), rv.select(rec_id="id", nt="nt", st="st")
+    else:
+        nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
     del s1v, rv
     m1, m2 = (lgb.Booster(model_file=str(MODELS / f)) for f in ("stage1.txt", "stage2.txt"))
     pairs = features.read(ppath)

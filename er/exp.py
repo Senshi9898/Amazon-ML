@@ -44,6 +44,8 @@ EXPS = {  # id: (parent, hypothesis, change dict)
     "E-11s": ("E-07s", "stage 2 on E-07s", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-07s"}),
     "E-11t": ("E-11s", "positive rate of the swapped-in / dropped name tokens (train labels) separates decoy "
                        "vocabulary from corruption vocabulary", {"stage2": ["CTX2", "SIB", "XSRC", "TOKR"]}),
+    "E-11u": ("E-11t", "the same statistic on street tokens and on the exact substitution pair adds precision",
+              {"stage2": ["CTX2", "SIB", "XSRC", "TOKR", "TOKA", "TOKP"]}),
     "E-08": ("E-07b", "up-weighting OOF hard negatives (p>=0.1, x5) raises precision at equal recall",
              {"hardneg": 5.0}),
     "E-11h": ("E-08", "stage 2 on the hard-negative stage 1", {"stage2": ["CTX2", "SIB", "XSRC"], "preds": "E-08"}),
@@ -188,7 +190,10 @@ def _stage2_table(cfg, subset, p, table=None):
     t = stage2.context(pairs, p, stage2.addr_sig(recs))
     if "TOKR" in cfg.get("stage2", []):
         _, _, _, s1v, rv = _views(cfg, subset)
-        nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
+        if "TOKA" in cfg["stage2"] or "TOKP" in cfg["stage2"]:
+            nts, ntr = s1v.select(s1_id="id", nt1="nt", st1="st"), rv.select(rec_id="id", nt="nt", st="st")
+        else:
+            nts, ntr = s1v.select(s1_id="id", nt1="nt"), rv.select(rec_id="id", nt="nt")
         del s1v, rv
         oof = table is None
         if oof:
