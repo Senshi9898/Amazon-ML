@@ -1,4 +1,4 @@
-# Final Research and Architecture Report — V4
+# Final Research and Architecture Report
 
 **Status:** final evidence-bounded design decision. This report supersedes V3 where its descriptions conflict with the current source. It does not claim a newly trained, full-scale model or a reproduced competition score.
 
@@ -97,10 +97,20 @@ Stage 2, source-side rank masquerading as target margin, cross-source support wi
 
 ## Implementation and reproducibility status
 
-The live source implements candidate score retention, the `tfidf_score` feature, one-owner-plus-NULL assignment, separate calibration/audit groups, and excludes held-out positive targets from sampled training negatives. The training path saves `use_stage2=false`; inference rejects incompatible schema/config artifacts. `models/config.json` and saved model pickles are stale (schema 5 incompatibility) and must not be presented as the trained V4 model. A full training/retraining and test inference were not run in this finalization. The output directory was empty when audited, so the official submission validator cannot yet confirm a final prediction package.
+The live source implements candidate score retention, the `tfidf_score` feature, one-owner-plus-NULL assignment, separate calibration/audit groups, and excludes held-out positive targets from sampled training negatives. The training path saves `use_stage2=false`; inference rejects incompatible schema/config artifacts. `models/config.json` and saved model pickles are stale (schema 5 incompatibility) and must not be presented as the trained model. A full training/retraining and test inference were not run in this finalization. The output directory was empty when audited, so the official submission validator cannot yet confirm a final prediction package.
 
 Full-scale operational evidence is also absent. The host has 16 GiB RAM, while eager representations over 12.5M training source rows create meaningful memory risk. Any later release run must record source revision, model/config hashes, threshold, candidate count/recall, per-country counts, precision/recall/macro F0.5 on the locked labeled audit, wall time, peak RSS, validator result, and output hashes. Do not use the sample scores in place of the official metric.
 
 ## Final conclusion
 
 The GT/source-ID audit passes with zero anomalies. The score regression from 0.952 to 0.951 remains unlocalized because the supplied scores lack reproducible run artifacts and labels. The defensible architecture is the simpler Stage 1 system with corrected retrieval provenance and one-owner/NULL decisions. Stage 2 is rejected after leakage was found and strict OOF results failed to reproduce a gain. Sample audits support the `tfidf_score` feature but do not establish 0.99. The honest expected full-evaluation range is roughly 0.95–0.96 until a representative labeled/official run proves otherwise.
+
+---
+
+## Post-submission outcome (addendum)
+
+*Added after this audit was written and after the competition concluded — the sections above are left unchanged as the decision record at the time they were made.*
+
+A final configuration was submitted and scored by the competition platform. The official final leaderboard result is macro F0.5 ≈ **0.971** (97.1/100), at a final rank of approximately **1500** (public, unofficial reports put total participation at over 10,500 teams). This is an externally-confirmed number from the competition platform, distinct in kind from the 0.951/0.952 figures discussed above — those remain unattributed to any reproducible artifact in this workspace and should still be treated as historical references only, not as evidence for the official result.
+
+The official 0.971 outcome sits above the 0.95–0.96 evidence-bounded estimate this report reached from sampled screening audits. That estimate was framed throughout as a conservative bound given the evidence available at the time (no full-scale run, unlabeled France cohort), not as a ceiling, so a result above it does not contradict the reasoning above — it indicates the actual risk (particularly France transfer) was smaller than the worst case the estimate was bounding against.

@@ -6,19 +6,20 @@ For each clean reference business (S1), find every record in two noisy sources (
 
 ## Status
 
-This is the frozen, evidence-bounded architecture described in `FINAL_ARCHITECTURE_V4.md`. It supersedes earlier, more elaborate drafts of this pipeline. Please read the two caveats below before trusting any number in this repo.
+This is the frozen, evidence-bounded architecture described in `ARCHITECTURE.md`. It supersedes earlier, more elaborate drafts of this pipeline. The competition has concluded; the final leaderboard result is confirmed (see table below). Two caveats still apply to everything else in this repo besides that final score:
 
-- **No full-scale run has been reproduced from current artifacts.** `models/config.json` and the saved model pickles predate the current feature/assignment schema and must not be treated as the trained model behind any reported score. A full train → test-inference → validate pass needs to be re-run before a number here can be called final.
-- **The previously reported 0.951 (current) / 0.952 (previous) scores are unattributed.** No reproducible run artifact in this workspace ties either number to a specific model, config or candidate set. Treat them as historical references, not confirmed results.
+- **No reproducibility log is on file for the specific run that produced the submitted output.** `models/config.json` and any older saved model pickles predate the current feature/assignment schema and must not be assumed to be the trained model behind the submitted score without checking.
+- **The previously reported 0.951 (current) / 0.952 (previous) internal scores are unattributed.** No reproducible run artifact in this workspace ties either number to a specific model, config or candidate set. Treat them as historical references, not confirmed results.
 
 | | Macro F0.5 | Basis |
 |---|---|---|
-| Locked audit sample, with corrected `tfidf_score` feature (seed A) | 0.9947 | ~600-S1 sampled audit — screening only |
-| Locked audit sample, with corrected `tfidf_score` feature (seed B) | 0.9924 | ~600-S1 sampled audit — screening only |
-| Evidence-bounded estimate for full evaluation | **≈0.95–0.96** | Extrapolated; not a measured full-scale score |
+| **Final leaderboard result (official)** | **≈0.971** (97.1/100) | Confirmed by the competition platform. Final rank ≈1500 of >10,500 teams (public, unofficial team-count report) |
+| Locked audit sample, with corrected `tfidf_score` feature (seed A) | 0.9947 | ~600-S1 sampled audit — screening only, pre-submission |
+| Locked audit sample, with corrected `tfidf_score` feature (seed B) | 0.9924 | ~600-S1 sampled audit — screening only, pre-submission |
+| Evidence-bounded estimate for full evaluation (pre-submission) | ≈0.95–0.96 | Extrapolated; superseded by the confirmed final result above |
 | Rules baseline | low; no country-specific or ML matching | For orientation only |
 
-The sampled-audit numbers use a 6,000-S1 sampled index and sampled target corpus, so they are **not** competition estimates: they have limited coverage of country mix (the France cohort cannot be sampled at all, since it has no labels) and of rare-error strata. Do not project them directly to the full test set.
+The sampled-audit numbers use a 6,000-S1 sampled index and sampled target corpus, so they were never competition estimates: they had limited coverage of country mix (the France cohort cannot be sampled at all, since it has no labels) and of rare-error strata. The confirmed final result came in above the pre-submission estimate, consistent with that estimate having been a conservative bound rather than a ceiling.
 
 ## How it works
 
@@ -31,7 +32,7 @@ The sampled-audit numbers use a 6,000-S1 sampled index and sampled target corpus
 
 **Also excluded from the core**, tested or considered and left out: character n-gram retrieval (marginal oracle gain for a large increase in candidate edges), Stage 2 hard-negative reweighting (reduced macro F0.5), a France-specific model/threshold, an additional address parser, embeddings/cross-encoders, graph propagation, external data, and geocoding (the last two are also prohibited by the competition rules).
 
-Every retained or rejected component is recorded, with its measured effect, in `FINAL_ARCHITECTURE_V4.md`.
+Every retained or rejected component is recorded, with its measured effect, in `ARCHITECTURE.md`.
 
 ## Setup
 ```
@@ -60,15 +61,15 @@ python3 utils/validate_submission.py \
     --test-dir dataset/test
 ```
 
-**Before relying on any output here:** confirm `models/config.json` and the model artifacts under `models/` match the current schema (the training path records `use_stage2=false`; inference rejects incompatible schema/config artifacts), and confirm `output/` is non-empty and validator-clean. Full-scale runtime and memory behaviour have not been verified on the development host — the implementation materialises comparatively large in-memory representations over the ~12.5M training source rows, and the host has 16 GiB RAM, so this is a real risk to check on the target machine before a final submission run.
+**Before relying on any locally-regenerated output here as a match for the submitted result:** confirm `models/config.json` and the model artifacts under `models/` match the current schema (the training path records `use_stage2=false`; inference rejects incompatible schema/config artifacts), and confirm `output/` is non-empty and validator-clean. Full-scale runtime and memory behaviour were an open risk during development — the implementation materialises comparatively large in-memory representations over the ~12.5M training source rows, and the host has 16 GiB RAM — so this is worth checking on the target machine before any further submission run.
 
 ## Layout
 ```
-FINAL_ARCHITECTURE_V4.md       the frozen architecture, its decision table, and known open risks
-models/                         Stage 1 model + config (verify schema/freshness before use — see above)
-artifacts/                      data/settings signature for the current run
-output/                         matching_results.tsv and candidate_pairs.tsv (generated, not tracked until run)
+ARCHITECTURE.md                 the frozen architecture, its decision table, and known open risks
+models/                          Stage 1 model + config (verify schema/freshness before use — see above)
+artifacts/                       data/settings signature for the current run
+output/                          matching_results.tsv and candidate_pairs.tsv
 ```
 
 ## Requirements
-Only the provided challenge data is used — no geocoding, registries, embeddings, or external/web lookups. No newly trained large model or reproduced competition score is claimed until a full run is confirmed against the current schema.
+Only the provided challenge data is used — no geocoding, registries, embeddings, or external/web lookups.
