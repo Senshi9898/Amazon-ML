@@ -15,7 +15,7 @@ For each clean reference business (S1), identify every record in two noisy sourc
 | **Competition Scale** | **32,000+ teams** |
 | **Competition** | Amazon ML Challenge 2026 |
 | **Team** | Grokking |
-| **Role** | Team Leader |
+| **Team Leader** | Divyanshu |
 
 The final score and leaderboard standing reflect the team's reported competition results.
 
