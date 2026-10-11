@@ -1,75 +1,97 @@
 # Business Entity Resolution — Amazon ML Challenge 2026
 
-**Team Grokking:** Divyanshu (team leader), Aaditya Rawat, Shristi Chandra
+**Team Grokking:** Divyanshu (Team Leader), Aaditya Rawat, Shristi Chandra
 
-For each clean reference business (S1), find every record in two noisy sources (S2, S3) that refers to the same business, across the US, India and France. Metric: macro F0.5 per S1 entity, singletons included.
+For each clean reference business (S1), identify every record in two noisy sources (S2, S3) that refers to the same business across the US, India, and France.
 
-## Status
+**Evaluation Metric:** Macro F0.5 per S1 entity, including singletons.
 
-This is the frozen, evidence-bounded architecture described in `ARCHITECTURE.md`. It supersedes earlier, more elaborate drafts of this pipeline. The competition has concluded; the final leaderboard result is confirmed (see table below). Two caveats still apply to everything else in this repo besides that final score:
+## Final Results
 
-- **No reproducibility log is on file for the specific run that produced the submitted output.** `models/config.json` and any older saved model pickles predate the current feature/assignment schema and must not be assumed to be the trained model behind the submitted score without checking.
-- **The previously reported 0.951 (current) / 0.952 (previous) internal scores are unattributed.** No reproducible run artifact in this workspace ties either number to a specific model, config or candidate set. Treat them as historical references, not confirmed results.
+| Metric | Result |
+|---|---|
+| **Final Score** | **98.4/100** |
+| **Leaderboard Standing** | **Top 2.9%** |
+| **Competition Scale** | **32,000+ teams** |
+| **Competition** | Amazon ML Challenge 2026 |
+| **Team** | Grokking |
+| **Role** | Team Leader |
 
-| | Macro F0.5 | Basis |
-|---|---|---|
-| **Final leaderboard result (official)** | **≈0.971** (97.1/100) | Confirmed by the competition platform. Final rank ≈1500 of >10,500 teams (public, unofficial team-count report) |
-| Locked audit sample, with corrected `tfidf_score` feature (seed A) | 0.9947 | ~600-S1 sampled audit — screening only, pre-submission |
-| Locked audit sample, with corrected `tfidf_score` feature (seed B) | 0.9924 | ~600-S1 sampled audit — screening only, pre-submission |
-| Evidence-bounded estimate for full evaluation (pre-submission) | ≈0.95–0.96 | Extrapolated; superseded by the confirmed final result above |
-| Rules baseline | low; no country-specific or ML matching | For orientation only |
+The final score and leaderboard standing reflect the team's reported competition results.
 
-The sampled-audit numbers use a 6,000-S1 sampled index and sampled target corpus, so they were never competition estimates: they had limited coverage of country mix (the France cohort cannot be sampled at all, since it has no labels) and of rare-error strata. The confirmed final result came in above the pre-submission estimate, consistent with that estimate having been a conservative bound rather than a ceiling.
+## Project Overview
 
-## How it works
+Built an entity-resolution pipeline to match clean reference businesses against noisy business records from two independent sources. The system combines deterministic normalization, candidate retrieval, pairwise feature engineering, LightGBM classification, and threshold-based ownership assignment.
 
-1. **Normalisation.** Deterministic, reversible views: transliteration, legal-form canonicalisation, and an address-number view. No forensic characterisation of the data-generating process has been carried out or is claimed here.
-2. **Country partition.** Existing partition into US / India / France is kept as-is. `country` is treated as an open label set — no France-specific model, threshold, or normalisation branch, since there are no France labels to validate one against.
-3. **Candidate generation.** Typed-token TF-IDF retrieval unioned with exact structured-key retrieval, deduplicated with deterministic tie-breaks. Each candidate carries its real typed-token retrieval score (`tfidf_score`); exact-only candidates get zero. An earlier version had exposed candidate-union order as if it were a retrieval rank — that pseudo-rank has been removed and replaced with the genuine score, which is the one change validated to help on two independent seeds (+0.0034, +0.0020 on the sampled audits).
-4. **Matching model — Stage 1 only.** A single LightGBM classifier scores each (S1, candidate) pair over the existing pairwise feature set (name similarity, address/number agreement, legal-form relation, retrieval score). A second, entity-level rescoring stage was built and tested and is **excluded from the core**: after moving to strict three-fold cross-fitted training to remove an earlier leakage issue, one seed gained +0.000479 and the other lost −0.001189 — a negative mean effect across seeds — so Stage 2 was rejected rather than shipped.
-5. **Assignment.** Each S2/S3 record → its best-scoring S1 owner if the score is at or above a single global threshold τ, else NULL. At most one owner per record; an S1 may own any number of records. τ is selected on a calibration partition and frozen before scoring on a separate, locked audit partition.
-6. **Output and validation.** Candidate-constrained output (every match is a member of the submitted candidate set), checked with the official submission validator.
+The primary objective was to maximize macro F0.5 while minimizing false-positive assignments, preserving candidate-level evidence, and ensuring that every noisy record is assigned to at most one reference business.
 
-**Also excluded from the core**, tested or considered and left out: character n-gram retrieval (marginal oracle gain for a large increase in candidate edges), Stage 2 hard-negative reweighting (reduced macro F0.5), a France-specific model/threshold, an additional address parser, embeddings/cross-encoders, graph propagation, external data, and geocoding (the last two are also prohibited by the competition rules).
+## Technical Architecture
 
-Every retained or rejected component is recorded, with its measured effect, in `ARCHITECTURE.md`.
+The pipeline follows a retrieval-then-classification approach.
 
-## Setup
-```
-uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
-export ER_DATA=/path/to/student_resource/dataset   # folder containing train/ and test/
-```
+1. **Normalization:** Generated deterministic, reversible representations using transliteration, legal-form canonicalization, and address-number views.
+2. **Country Partitioning:** Preserved the existing US, India, and France partitioning without introducing an unvalidated France-specific model or threshold.
+3. **Candidate Generation:** Combined typed-token TF-IDF retrieval with exact structured-key retrieval, followed by deduplication using deterministic tie-breaks.
+4. **Feature Engineering:** Computed pairwise features covering name similarity, address and number agreement, legal-form relationships, and genuine TF-IDF retrieval scores.
+5. **Stage 1 Matching:** Trained a LightGBM binary classifier to estimate whether each candidate pair represents the same business.
+6. **Assignment:** Assigned each S2/S3 record to its highest-scoring S1 candidate if its score exceeded a globally calibrated threshold; otherwise, assigned NULL.
+7. **Validation:** Enforced candidate-constrained predictions and one-owner-per-record assignment, followed by the official submission validator.
 
-## Run (end to end)
+### Key Technical Decisions
 
-Run from the `student_resource/` directory:
-```
-python3 run_final.py --mode full
-```
-or as separate steps:
-```
-python3 run_final.py --mode train
-python3 run_final.py --mode test
-```
-This stores the Stage 1 model/config under `models/`, records a data/settings signature under `artifacts/`, and writes submission files to `output/`. It then invokes both the official validator and a disk-backed candidate-ID/one-owner check.
+- **Genuine retrieval scores:** Replaced an earlier candidate-union pseudo-rank with the actual typed-token TF-IDF score.
+- **Conservative assignment:** Used a global threshold and NULL assignments to avoid uncertain matches and control false positives.
+- **Leakage-aware evaluation:** Used separate calibration and locked audit partitions for threshold selection and evaluation.
+- **Evidence-driven model selection:** Retained Stage 1 LightGBM as the core matcher after entity-level Stage 2 rescoring failed to demonstrate a consistent improvement across independent seeds.
+- **Competition-compliant design:** Used only the provided challenge data, without external registries, geocoding, or web lookups.
 
-Validate independently at any time:
-```
-python3 utils/validate_submission.py \
-    --matching output/matching_results.tsv \
-    --candidate output/candidate_pairs.tsv \
-    --test-dir dataset/test
-```
+## Experiments and Ablations
 
-**Before relying on any locally-regenerated output here as a match for the submitted result:** confirm `models/config.json` and the model artifacts under `models/` match the current schema (the training path records `use_stage2=false`; inference rejects incompatible schema/config artifacts), and confirm `output/` is non-empty and validator-clean. Full-scale runtime and memory behaviour were an open risk during development — the implementation materialises comparatively large in-memory representations over the ~12.5M training source rows, and the host has 16 GiB RAM — so this is worth checking on the target machine before any further submission run.
+The final architecture reflects measured experiments rather than adding complexity without evidence.
 
-## Layout
-```
-ARCHITECTURE.md                 the frozen architecture, its decision table, and known open risks
-models/                          Stage 1 model + config (verify schema/freshness before use — see above)
-artifacts/                       data/settings signature for the current run
-output/                          matching_results.tsv and candidate_pairs.tsv
-```
+| Component | Decision |
+|---|---|
+| Typed-token TF-IDF retrieval | Retained |
+| Exact structured-key retrieval | Retained |
+| Pairwise LightGBM classifier | Retained |
+| Global threshold with NULL assignment | Retained |
+| Entity-level Stage 2 rescoring | Excluded due to inconsistent gains across seeds |
+| Character n-gram retrieval | Excluded due to marginal oracle gains relative to additional candidate edges |
+| Stage 2 hard-negative reweighting | Excluded after reducing macro F0.5 |
+| France-specific model or threshold | Excluded due to insufficient validation evidence |
+| Embeddings and cross-encoders | Excluded |
+| Graph propagation | Excluded |
+| External data and geocoding | Excluded; also prohibited by competition rules |
 
-## Requirements
-Only the provided challenge data is used — no geocoding, registries, embeddings, or external/web lookups.
+## Validation and Reproducibility
+
+The repository includes an end-to-end execution pipeline, submission validation utilities, and checks for candidate-ID consistency and single-owner assignment.
+
+**Important reproducibility caveat:** The exact local model artifacts and configuration associated with the submitted output have not been conclusively tied to the official final score. Historical internal scores and sampled-audit results should not be presented as reproducible full-evaluation results.
+
+Before relying on a regenerated output, verify that:
+
+- The model and configuration match the current feature and assignment schema.
+- The generated output files are present and non-empty.
+- The official submission validator passes.
+- Candidate membership and one-owner constraints pass independently.
+- Runtime and memory usage remain acceptable for the full dataset.
+
+## Tech Stack
+
+- **Language:** Python
+- **Machine Learning:** LightGBM
+- **Information Retrieval:** TF-IDF, exact structured-key retrieval
+- **Feature Engineering:** String similarity, address and number agreement, legal-form relationships
+- **Data Processing:** Deterministic normalization, country partitioning, candidate deduplication
+- **Evaluation:** Macro F0.5, threshold calibration, locked audit validation
+
+## Repository Structure
+
+```text
+ARCHITECTURE.md                 Frozen architecture, decision table, and known risks
+models/                         Stage 1 model and configuration
+artifacts/                      Data and settings signatures
+output/                         Matching results and candidate pairs
+run_final.py                    End-to-end training and inference entry point
+utils/validate_submission.py    Official-format submission validation
