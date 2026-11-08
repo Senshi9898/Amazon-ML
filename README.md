@@ -11,7 +11,7 @@ For each clean reference business (S1), identify every record in two noisy sourc
 | Metric | Result |
 |---|---|
 | **Final Score** | **98.4/100** |
-| **Leaderboard Standing** | **Top 2.9%** |
+| **Leaderboard Standing** | **Top 2%** |
 | **Competition Scale** | **32,000+ teams** |
 | **Competition** | Amazon ML Challenge 2026 |
 | **Team** | Grokking |
